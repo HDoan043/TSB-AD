@@ -342,8 +342,18 @@ def run_TimesNet(data_train, data_test, win_size=96, lr=1e-4):
     return score.ravel()
 
 def run_MTSC(data_train, data_test, **args):
-    from .models.TimesNet import TimesNet
-    clf = MTSC(**args)
+    from .models.MTSC import MTSC
+    kargs = {
+        'num_experts': args.get('num_experts', 5), 
+        'c_in': args.get('enc_in',1), 
+        'd_model': args.get('d_model',8), 
+        'win_size': args.get('win_size', 64), 
+        'expert_layers': args.get('expert_layers', 3), 
+        'expert_num_kernels': args.get('expert_num_kernels', 2),
+        'expert_top_k': args.get('expert_top_k', 2)
+    }
+    
+    clf = MTSC(**kargs)
     clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
