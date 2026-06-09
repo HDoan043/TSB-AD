@@ -265,8 +265,8 @@ class MTSC():
 
         self.__anomaly_score = None
         
-        # cuda = True
-        cuda = False
+        cuda = True
+        # cuda = False
         self.y_hats = None
         
         self.cuda = cuda
