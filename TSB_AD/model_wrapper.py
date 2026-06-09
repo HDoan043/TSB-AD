@@ -343,9 +343,10 @@ def run_TimesNet(data_train, data_test, win_size=96, lr=1e-4):
 
 def run_MTSC(data_train, data_test, **args):
     from .models.MTSC import MTSC
+    auto_enc_in = data_train.shape[1]
     kargs = {
         'num_experts': args.get('num_experts', 5), 
-        'enc_in': args.get('enc_in',1), 
+        'enc_in': auto_enc_in, 
         'd_model': args.get('d_model',8), 
         'win_size': args.get('win_size', 64), 
         'expert_layers': args.get('expert_layers', 3), 
