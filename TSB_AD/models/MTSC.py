@@ -186,7 +186,8 @@ class Model(nn.Module):
                  num_kernels = expert_num_kernels,
                  top_k = expert_top_k,
                  dropout=0.1) for _ in range(num_experts)])
-        self.channel_embed = nn.Embedding(num_embeddings = c_in, embedding_dim = d_model)
+        self.channel_attention = nn.MultiheadAttention(embed_dim=d_model, num_heads=4, batch_first=True, dropout=0.1)
+        self.norm = nn.LayerNorm(d_model)
         
         self.decoder = nn.Linear(in_features= d_model, out_features=win_size)
         
@@ -218,11 +219,9 @@ class Model(nn.Module):
         out1 = torch.reshape(out1, (B,C,self.num_experts, -1))# [B, c_in, num_expert, d_model]
         out1 = (out1*expert_ratio).sum(dim=2)                 # [B, c_in, d_model]
         
-        look_up_table = torch.arange(C, device=x.device)      # [c_in]
-        out2 = self.channel_embed(look_up_table)              # [c_in, d_model]
-        attn = (out2 @ out2.T)/ math.sqrt(self.d_model)       # [c_in, c_in]
-        attn = torch.softmax(attn, dim=-1)                    # [c_in, c_in]
-        out = attn @ out1                                     # [B, c_in, d_model]
+        attn_out, attn_weights = self.channel_attention(out1, out1, out1)
+        
+        out = self.norm(out1 + attn_out)
         
         x_hat = self.decoder(out)                             # [B, c_in, win_size]
         x_hat = x_hat.permute(0,2,1).contiguous()             # [B, win_size, c_in]
