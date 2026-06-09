@@ -8,7 +8,7 @@ from .utils.slidingWindows import find_length_rank
 Unsupervise_AD_Pool = ['FFT', 'SR', 'NORMA', 'Series2Graph', 'Sub_IForest', 'IForest', 'LOF', 'Sub_LOF', 'POLY', 'MatrixProfile', 'Sub_PCA', 'PCA', 'HBOS',
                         'Sub_HBOS', 'KNN', 'Sub_KNN','KMeansAD', 'KMeansAD_U', 'KShapeAD', 'COPOD', 'CBLOF', 'COF', 'EIF', 'RobustPCA', 'MMPAD', 'Lag_Llama', 'TimesFM', 'Chronos', 'MOMENT_ZS', 'TSPulse_ZS', 'Time_RCD']
 Semisupervise_AD_Pool = ['Left_STAMPi', 'SAND', 'MCD', 'Sub_MCD', 'OCSVM', 'Sub_OCSVM', 'AutoEncoder', 'CNN', 'LSTMAD', 'TranAD', 'USAD', 'OmniAnomaly', 'PatchTST',
-                        'AnomalyTransformer', 'TimesNet', 'FITS', 'Donut', 'OFA', 'MOMENT_FT', 'M2N2', 'TSPulse_FT', 'xLSTMAD', 'CHARM', 'StreamVAE']
+                        'AnomalyTransformer', 'TimesNet', 'FITS', 'Donut', 'OFA', 'MOMENT_FT', 'M2N2', 'TSPulse_FT', 'xLSTMAD', 'CHARM', 'StreamVAE', 'MTSC']
 
 def run_Unsupervise_AD(model_name, data, **kwargs):
     try:
@@ -337,6 +337,13 @@ def run_Donut(data_train, data_test, win_size=120, lr=1e-4, batch_size=128):
 def run_TimesNet(data_train, data_test, win_size=96, lr=1e-4):
     from .models.TimesNet import TimesNet
     clf = TimesNet(win_size=win_size, enc_in=data_test.shape[1], lr=lr, epochs=50)
+    clf.fit(data_train)
+    score = clf.decision_function(data_test)
+    return score.ravel()
+
+def run_MTSC(data_train, data_test, **args):
+    from .models.TimesNet import TimesNet
+    clf = MTSC(**args)
     clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
