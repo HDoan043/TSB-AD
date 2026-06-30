@@ -248,16 +248,16 @@ class PDE():
             self.model.train()
             
             loop = tqdm.tqdm(enumerate(train_loader),total=len(train_loader),leave=True)
-            print("hello")
             for i, (batch_x, _) in loop:
-                print("hello2")
                 self.model_optim.zero_grad()
                 
                 batch_x = batch_x.float().to(self.device)
-                
+
+                print("hello1")
                 x_norm, dec_x, x_recon = self.model(batch_x)
+                print("hello2")
                 loss = self.criterion(x_norm, dec_x, x_recon)
-                
+                print("hello3")
                 loss.backward()
                 self.model_optim.step()
                 
