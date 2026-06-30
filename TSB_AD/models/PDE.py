@@ -120,18 +120,22 @@ class Model(nn.Module):
         
         # Định nghĩa bộ tạo mặt nạ (decomposition)
         self.soft_masking = MaskingNetwork(top_k, d_model, win_size, num_experts=self.num_subsequences, channels = channels)
+        # TÍNH TOÁN NÚT THẮT CỔ CHAI THỰC SỰ
+        # Đảm bảo tổng dung lượng (bottleneck_dim * num_experts) chỉ bằng win_size // 2
+        bottleneck_dim = win_size // (self.num_subsequences * 2) 
+        bottleneck_dim = max(1, bottleneck_dim) # Đảm bảo ít nhất là 1 chiều
         
         self.compressor = nn.ModuleList(
             [nn.Sequential(
                 # nn.Conv1d(in_channels=channels, out_channels = 2, kernel_size=4, stride=4, padding=0),
-                nn.Linear(win_size, win_size//4),
+                nn.Linear(win_size, bottleneck_dim),
                 nn.GELU()) \
                 # nn.Conv1d(in_channels=2, out_channels=4, kernel_size=4, stride=4, padding=0),
                 # nn.GELU()) \
              for _ in range(self.num_subsequences)])
         
         self.decompressor = nn.ModuleList(
-            [nn.Sequential( nn.Linear(win_size//4, win_size)) \
+            [nn.Sequential( nn.Linear(bottleneck_dim, win_size)) \
                 # nn.ConvTranspose1d(in_channels=4, out_channels=2, kernel_size=4, stride=4, padding=0),
                 # nn.GELU(),
                 # nn.ConvTranspose1d(in_channels=2, out_channels=channels, kernel_size=4, stride=4, padding=0, bias = False)) \
