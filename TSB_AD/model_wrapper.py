@@ -41,7 +41,7 @@ def run_Semisupervise_AD(model_name, data_train, data_test, **kwargs):
         print(error_message)
         return error_message
 
-def run_PDE(data, data_test, win_size=96, d_model =32, top_k=2, num_experts=4):
+def run_PDE(data_train, data_test, win_size=96, d_model =32, top_k=2, num_experts=4):
     from .models.PDE import PDE
     clf = PDE(win_size, d_model, top_k, num_experts)
     clf.fit(data_train)
