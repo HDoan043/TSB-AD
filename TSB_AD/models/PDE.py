@@ -233,6 +233,8 @@ class PDE():
         self.early_stopping = EarlyStoppingTorch(None, patience=self.patience)
         
         self.input_shape = (self.batch_size, self.win_size, channels)
+        self.save_path = "/kaggle/working/logs"
+        os.makedirs(self.save_path, exist_ok=True)
 
     def fit(self, data):
         tsTrain = data[:int((1-self.validation_size)*len(data))]
@@ -301,7 +303,6 @@ class PDE():
                 break
             
             adjust_learning_rate(self.model_optim, epoch + 1, self.lradj, self.lr)
-    
     def decision_function(self, data):
         test_loader = DataLoader(
             dataset=ReconstructDataset(data, window_size=self.win_size),
@@ -310,48 +311,131 @@ class PDE():
         )
         
         self.model.eval()
-        attens_energy = []
-        y_hats = []
         self.anomaly_criterion = nn.MSELoss(reduction='none')
         
-        loop = tqdm.tqdm(enumerate(test_loader),total=len(test_loader),leave=True)
+        # 1. Khởi tạo các mảng Global để chứa dữ liệu cộng dồn
+        N = len(data)
+        C = data.shape[-1] if data.ndim > 1 else 1 # Số kênh (channels)
+        
+        full_scores = np.zeros(N)
+        full_counts = np.zeros(N)
+        
+        # Lưu lại để debug
+        full_recon = np.zeros((N, C))
+        full_true = np.zeros((N, C))
+        full_experts = np.zeros((N, self.num_experts, C))
+        
+        global_idx = 0
+        loop = tqdm.tqdm(enumerate(test_loader), total=len(test_loader), leave=True)
+        
         with torch.no_grad():
             for i, (batch_x, _) in loop:
                 batch_x = batch_x.float().to(self.device)
-                # reconstruction
-                x_norm, _, outputs = self.model(batch_x)
-                # criterion
-                score = torch.mean(self.anomaly_criterion(x_norm, outputs), dim=-1)    # [B, win_size]
-                y_hat = torch.squeeze(outputs, -1)
-
-                score = score.mean(dim=1).detach().cpu().numpy()
-                y_hat = y_hat.detach().cpu().numpy()[:, self.win_size // 2]
+                if batch_x.dim() == 2:
+                    batch_x = batch_x.unsqueeze(-1)
                 
-                attens_energy.append(score)
-                y_hats.append(y_hat)
+                B = batch_x.size(0)
+                
+                # Reconstruction
+                x_norm, dec_x, outputs = self.model(batch_x)
+                
+                # Tính score theo từng điểm (Point-wise score)
+                # Kích thước: [B, win_size] (đã trung bình qua các kênh)
+                point_scores = torch.mean(self.anomaly_criterion(x_norm, outputs), dim=-1).cpu().numpy()
+                
+                # Ép kiểu và đưa về CPU
+                x_norm_np = x_norm.cpu().numpy()                       # [B, win_size, C]
+                outputs_np = outputs.cpu().numpy()                     # [B, win_size, C]
+                dec_x_np = dec_x.permute(0, 1, 3, 2).cpu().numpy()     # [B, num_experts, win_size, C]
+                
+                # 2. Xử lý Overlap: Cộng dồn vào mảng Global
+                for b in range(B):
+                    start = global_idx + b
+                    end = start + self.win_size
+                    
+                    full_scores[start:end] += point_scores[b]
+                    full_true[start:end] += x_norm_np[b]
+                    full_recon[start:end] += outputs_np[b]
+                    full_experts[start:end] += dec_x_np[b]
+                    full_counts[start:end] += 1
+                    
+                global_idx += B
                 loop.set_description(f'Testing Phase: ')
 
-        attens_energy = np.concatenate(attens_energy, axis=0).reshape(-1)
-        scores = np.array(attens_energy)
+        # Tránh chia cho 0 ở những điểm không được cover (nếu có)
+        full_counts[full_counts == 0] = 1
         
-        y_hats = np.concatenate(y_hats, axis=0).reshape(-1)
-        y_hats = np.array(y_hats)
-
-        assert scores.ndim == 1
+        # 3. Tính trung bình (Averaging) để khử nhiễu và làm mượt
+        full_scores = full_scores / full_counts
+        full_true = full_true / full_counts[:, None]
+        full_recon = full_recon / full_counts[:, None]
+        full_experts = full_experts / full_counts[:, None, None]
         
-        import shutil
-        self.save_path = None
-        if self.save_path and os.path.exists(self.save_path):
-            shutil.rmtree(self.save_path)
-            
-        self.__anomaly_score = scores
-        self.y_hats = y_hats
-
-        if self.__anomaly_score.shape[0] < len(data):
-            self.__anomaly_score = np.array([self.__anomaly_score[0]]*math.ceil((self.win_size-1)/2) + 
-                        list(self.__anomaly_score) + [self.__anomaly_score[-1]]*((self.win_size-1)//2))
+        self.__anomaly_score = full_scores
+        
+        # Đóng gói dữ liệu debug
+        self.debug_data = {
+            "scores": full_scores,
+            "true_seq": full_true,
+            "recon_seq": full_recon,
+            "expert_seqs": full_experts
+        }
+        with open(os.path.join(self.save_path, "log.json"), "w") as f:
+            json.dump(self.debug_data, f)
         
         return self.__anomaly_score
+    # def decision_function(self, data):
+    #     test_loader = DataLoader(
+    #         dataset=ReconstructDataset(data, window_size=self.win_size),
+    #         batch_size=self.batch_size,
+    #         shuffle=False
+    #     )
+        
+    #     self.model.eval()
+    #     attens_energy = []
+    #     y_hats = []
+    #     self.anomaly_criterion = nn.MSELoss(reduction='none')
+        
+    #     loop = tqdm.tqdm(enumerate(test_loader),total=len(test_loader),leave=True)
+    #     expert_out = []
+    #     with torch.no_grad():
+    #         for i, (batch_x, _) in loop:
+    #             batch_x = batch_x.float().to(self.device)
+    #             # reconstruction
+    #             x_norm, dec_x, outputs = self.model(batch_x)
+    #             expert_out.append(dec_x.permute(0,2,1))                                # dec_x: [B, num_experts, C, win_size]
+    #             # criterion
+    #             score = torch.mean(self.anomaly_criterion(x_norm, outputs), dim=-1)    # [B, win_size]
+    #             y_hat = torch.squeeze(outputs, -1)
+
+    #             score = score.mean(dim=1).detach().cpu().numpy()
+    #             y_hat = y_hat.detach().cpu().numpy()[:, self.win_size // 2]
+                
+    #             attens_energy.append(score)
+    #             y_hats.append(y_hat)
+    #             loop.set_description(f'Testing Phase: ')
+
+    #     attens_energy = np.concatenate(attens_energy, axis=0).reshape(-1)
+    #     scores = np.array(attens_energy)
+        
+    #     y_hats = np.concatenate(y_hats, axis=0).reshape(-1)
+    #     y_hats = np.array(y_hats)
+
+    #     assert scores.ndim == 1
+        
+    #     import shutil
+    #     self.save_path = None
+    #     if self.save_path and os.path.exists(self.save_path):
+    #         shutil.rmtree(self.save_path)
+            
+    #     self.__anomaly_score = scores
+    #     self.y_hats = y_hats
+
+    #     if self.__anomaly_score.shape[0] < len(data):
+    #         self.__anomaly_score = np.array([self.__anomaly_score[0]]*math.ceil((self.win_size-1)/2) + 
+    #                     list(self.__anomaly_score) + [self.__anomaly_score[-1]]*((self.win_size-1)//2))
+        
+    #     return self.__anomaly_score
 
     def anomaly_score(self) -> np.ndarray:
         return self.__anomaly_score
