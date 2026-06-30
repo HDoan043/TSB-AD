@@ -252,9 +252,9 @@ class PDE():
                 self.model_optim.zero_grad()
                 
                 batch_x = batch_x.float().to(self.device)
-
-                print("hello1")
-                x_norm, dec_x, x_recon = self.model(batch_x)
+                out = self.model(batch_x)
+                print(out.shape)
+                x_norm, dec_x, x_recon = out
                 print("hello2")
                 loss = self.criterion(x_norm, dec_x, x_recon)
                 print("hello3")
