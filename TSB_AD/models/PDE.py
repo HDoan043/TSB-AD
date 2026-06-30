@@ -133,14 +133,14 @@ class Model(nn.Module):
         self.compressor = nn.ModuleList(
             [nn.Sequential(
                 # nn.Conv1d(in_channels=channels, out_channels = 2, kernel_size=4, stride=4, padding=0),
-                nn.Linear(win_size, bottleneck_dim))\
+                nn.Linear(win_size, d_model))\
                 # nn.GELU()) \
                 # nn.Conv1d(in_channels=2, out_channels=4, kernel_size=4, stride=4, padding=0),
                 # nn.GELU()) \
              for _ in range(self.num_subsequences)])
         
         self.decompressor = nn.ModuleList(
-            [nn.Sequential( nn.Linear(bottleneck_dim, win_size)) \
+            [nn.Sequential( nn.Linear(d_model, win_size)) \
                 # nn.ConvTranspose1d(in_channels=4, out_channels=2, kernel_size=4, stride=4, padding=0),
                 # nn.GELU(),
                 # nn.ConvTranspose1d(in_channels=2, out_channels=channels, kernel_size=4, stride=4, padding=0, bias = False)) \
@@ -162,7 +162,8 @@ class Model(nn.Module):
         # Ép qua bộ nén và bộ giải nén dung lượng thấp
         dec_x = []
         for i in range(self.num_subsequences):
-            enc_x = self.compressor[i](x_masked[:, i, : ,:])                # [B, d_model, win_size//4]       
+            # enc_x = self.compressor[i](x_masked[:, i, : ,:])                # [B, d_model, win_size//4]     
+            enc_x = self.compressor[i](x_masked)                            # [B, C, d_model]
             dec_x.append(self.decompressor[i](enc_x))                       # [B, C, win_size]
         dec_x = torch.stack(dec_x, dim=1)                                   # [B, num_subsequences, C, win_size]
         
