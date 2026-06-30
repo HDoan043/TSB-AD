@@ -162,7 +162,7 @@ class Model(nn.Module):
         return x_norm, dec_x, x_out
     
 class PureLoss(nn.Module):
-    def __init__(self, lambda_pure=0.5):
+    def __init__(self, lambda_pure=0.1):
         super(PureLoss, self).__init__()
         self.mse = nn.MSELoss()
         self.lambda_pure = lambda_pure
@@ -184,12 +184,13 @@ class PureLoss(nn.Module):
         cos_sim_matrix_sq = cos_sim_matrix_sq * (1 - diagonal_mask)
 
         # pure loss trung bình trên các kênh của các mẫu trong 1 batch
-        pure_loss = cos_sim_matrix_sq.sum() / (batch_x_norm.size(0)*batch_x_norm.size(-1))
+        num_pairs = num_sub * (num_sub - 1)
+        pure_loss = cos_sim_matrix_sq.sum() / (batch_x_norm.size(0) * batch_x_norm.size(-1) * num_pairs)
         
         # 4. Cộng tổng hợp có trọng số
         total_loss = recon_loss + self.lambda_pure*pure_loss
         
-        return total_loss
+        return total_loss, recon_loss, pure_loss
 
 class PDE():
     '''
@@ -257,6 +258,8 @@ class PDE():
         for epoch in range(1, self.epochs + 1):
             ## Training
             train_loss = 0
+            train_recon_loss = 0
+            train_pure_loss = 0
             self.model.train()
             
             loop = tqdm.tqdm(enumerate(train_loader),total=len(train_loader),leave=True)
@@ -266,14 +269,16 @@ class PDE():
                 batch_x = batch_x.float().to(self.device)
                 out = self.model(batch_x)
                 x_norm, dec_x, x_recon = out
-                loss = self.criterion(x_norm, dec_x, x_recon)
+                loss, recon_loss, pure_loss = self.criterion(x_norm, dec_x, x_recon)
                 loss.backward()
                 self.model_optim.step()
                 
                 train_loss += loss.cpu().item()
+                train_recon_loss += recon_loss.cpu().item()
+                train_pure_loss += pure_loss.cpu().item()
                 
                 loop.set_description(f'Training Epoch [{epoch}/{self.epochs}]')
-                loop.set_postfix(loss=loss.item(), avg_loss=train_loss/(i+1))
+                loop.set_postfix(loss=loss.item(), avg_loss=train_loss/(i+1), avg_recon_loss=train_recon_loss/(i+1), avg_pure_loss=train_pure_loss/(i+1))
             
             ## Validation
             self.model.eval()
