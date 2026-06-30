@@ -51,7 +51,7 @@ class MaskingNetwork(nn.Module):
         )
         
         self.project = nn.Conv1d(d_model * 4, num_experts*channels, kernel_size=1)
-        self.sigmoid = nn.Sigmoid()
+        self.softmax = nn.Softmax(dim=1)
         
     def stft_multi_win(self, x):
         # Đầu vào: x [B, win_size, channels]
@@ -108,7 +108,7 @@ class MaskingNetwork(nn.Module):
         x = torch.cat([x1,x2,x3,x4], dim=1)             # [B, 4*d_model, win_size]
         x = self.project(x)                             # [B, num_experts*C, win_size]
         x = x.view(B,self.num_experts,C,win_size)       # [B, num_experts, C, win_size]
-        x = self.sigmoid(x)                             # [B, num_experts, C, win_size]
+        x = self.sofmax(x)                              # [B, num_experts, C, win_size]
         
         return x
         
@@ -133,7 +133,7 @@ class Model(nn.Module):
             [nn.Sequential( 
                 nn.ConvTranspose1d(in_channels=d_model, out_channels=d_model//2, kernel_size=4, stride=2, padding=1),
                 nn.GELU(),
-                nn.ConvTranspose1d(in_channels=d_model // 2, out_channels=channels, kernel_size=4, stride=2, padding=1)) \
+                nn.ConvTranspose1d(in_channels=d_model // 2, out_channels=channels, kernel_size=4, stride=2, padding=1, bias = False)) \
                 for _ in range(self.num_subsequences)])
         
     def forward(self, x): 
@@ -162,7 +162,7 @@ class Model(nn.Module):
         return x_norm, dec_x, x_out
     
 class PureLoss(nn.Module):
-    def __init__(self, lambda_pure=0.1):
+    def __init__(self, lambda_pure=0.05):
         super(PureLoss, self).__init__()
         self.mse = nn.MSELoss()
         self.lambda_pure = lambda_pure
