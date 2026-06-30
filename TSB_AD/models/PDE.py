@@ -346,7 +346,7 @@ class PDE():
                 # Ép kiểu và đưa về CPU
                 x_norm_np = x_norm.cpu().numpy()                       # [B, win_size, C]
                 outputs_np = outputs.cpu().numpy()                     # [B, win_size, C]
-                dec_x_np = dec_x.permute(0, 1, 3, 2).cpu().numpy()     # [B, num_experts, win_size, C]
+                dec_x_np = dec_x.permute(0, 3, 1, 2).cpu().numpy()     # ĐÚNG shape [B, win_size, num_experts, C]     
                 
                 # 2. Xử lý Overlap: Cộng dồn vào mảng Global
                 for b in range(B):
