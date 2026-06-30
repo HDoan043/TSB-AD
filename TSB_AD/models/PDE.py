@@ -140,7 +140,7 @@ class Model(nn.Module):
         epsi = 1e-5
         B, win_size, C = x.size()
         # Giả sử x đầu vào có dạng [B, win_size]
-        x = x/(torch.sqrt((x**2).sum(dim=-1, keepdim=True))+epsi)           # [B, win_size, C]
+        x = x/(torch.sqrt((x**2).sum(dim=1, keepdim=True))+epsi)            # [B, win_size, C]
         x_norm = x.clone()                                                  # [B, win_size, C]
         
         # Tính toán mặt nạ mềm
