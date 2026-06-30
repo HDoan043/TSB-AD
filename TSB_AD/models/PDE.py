@@ -104,7 +104,6 @@ class MaskingNetwork(nn.Module):
     def forward(self, x):                               # [B, win_size, C]
         B, win_size, C = x.size()
         x = self.stft_multi_win(x)                      # [B, C*(k+1), win_size]
-        x = 
         # x1 = self.branch1(x)                            # [B, d_model, win_size]
         # x2 = self.branch2(x)                            # [B, d_model, win_size]
         # x3 = self.branch3(x)                            # [B, d_model, win_size]
