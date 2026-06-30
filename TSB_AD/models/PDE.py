@@ -124,15 +124,15 @@ class Model(nn.Module):
         self.compressor = nn.ModuleList(
             [nn.Sequential(
                 nn.Conv1d(in_channels=channels, out_channels=d_model//2, kernel_size=5, stride=2, padding=2),
-                SinActivation(),
+                nn.GeLU(),
                 nn.Conv1d(in_channels=d_model // 2, out_channels=d_model, kernel_size=5, stride=2, padding=2),
-                SinActivation()) \
+                nn.GeLU()) \
              for _ in range(self.num_subsequences)])
         
         self.decompressor = nn.ModuleList(
             [nn.Sequential( 
                 nn.ConvTranspose1d(in_channels=d_model, out_channels=d_model//2, kernel_size=4, stride=2, padding=1),
-                SinActivation(),
+                nn.GeLU(),
                 nn.ConvTranspose1d(in_channels=d_model // 2, out_channels=channels, kernel_size=4, stride=2, padding=1)) \
                 for _ in range(self.num_subsequences)])
         
