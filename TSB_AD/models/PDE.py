@@ -113,9 +113,9 @@ class MaskingNetwork(nn.Module):
         return x
         
 class Model(nn.Module):
-    def __init__(self, win_size, d_model, top_k=2, channels = 1):
+    def __init__(self, win_size, d_model, top_k=2, channels = 1, num_experts = 4):
         super(Model, self).__init__()
-        self.num_subsequences = 2
+        self.num_subsequences = num_experts
         self.win_size = win_size
         
         # Định nghĩa bộ tạo mặt nạ (decomposition)
@@ -227,7 +227,7 @@ class PDE():
         self.cuda = cuda
         self.device = get_gpu(self.cuda)
             
-        self.model = Model(win_size, d_model, top_k, channels = channels).float().to(self.device)
+        self.model = Model(win_size, d_model, top_k, channels = channels, num_experts = num_experts).float().to(self.device)
         self.model_optim = optim.Adam(self.model.parameters(), lr=self.lr)
         self.criterion = PureLoss()
         
