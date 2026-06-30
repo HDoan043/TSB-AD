@@ -381,8 +381,8 @@ class PDE():
             "recon_seq": full_recon,
             "expert_seqs": full_experts
         }
-        with open(os.path.join(self.save_path, "log.json"), "w") as f:
-            json.dump(self.debug_data, f)
+        for key, value in self.debug_data.items():
+            np.save(os.path.join(self.save_path, f"{key}.npy"), value)
         
         return self.__anomaly_score
     # def decision_function(self, data):
