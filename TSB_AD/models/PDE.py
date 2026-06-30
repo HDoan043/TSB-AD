@@ -56,33 +56,35 @@ class MaskingNetwork(nn.Module):
         # Đầu vào: x [B, win_size, channels]
         B, win_size, channels = x.size()
         x = x.permute(0,2,1)                                                        # [B, C, win_size]
+        
         n_fft_ls = [win_size, win_size // 2, win_size // 4]
         hop_length = 1
         Z = [x]
-        
+        x = x.contiguous().view(B*channels, win_size)                                            # [B*C, win_size]
         for n_fft in n_fft_ls:
             # 1. Tính số lượng tần số F của khung này
             F = n_fft // 2 + 1
             
-            # 2. Thực hiện STFT -> z có shape: [B, C, F, T]
+            # 2. Thực hiện STFT -> z có shape: [B*C, F, T]
             z = torch.stft(x, n_fft=n_fft, hop_length=hop_length, win_length=n_fft, 
                             window=None, center=True, return_complex=True)
             
             # 3. Tính biên độ để lấy top K (Đảm bảo K không vượt quá số tần số F)
             a = torch.abs(z)
             current_k = min(self.top_k, F) 
-            _, top_k_indices = torch.topk(a, k=current_k, dim=2) # shape: [B, C, current_k, T]
+            _, top_k_indices = torch.topk(a, k=current_k, dim=1) # shape: [B*C, current_k, T]
             
             # 4. Trích xuất số phức Top K và dựng lại ma trận lọc nhiễu
-            top_k_z = torch.gather(z, dim=2, index=top_k_indices)
+            top_k_z = torch.gather(z, dim=1, index=top_k_indices)
             filtered_stft = torch.zeros_like(z, device=z.device)
-            filtered_stft.scatter_(dim=2, index=top_k_indices, src=top_k_z)
+            filtered_stft.scatter_(dim=1, index=top_k_indices, src=top_k_z)
             
             # 5. Biến đổi ngược ISTFT
             # CỰC KỲ QUAN TRỌNG: Thêm length=win_size để ép đầu ra các vòng lặp luôn bằng nhau
             recon_x = torch.istft(filtered_stft, n_fft=n_fft, hop_length=hop_length, 
                                 win_length=n_fft, window=None, center=True, 
-                                return_complex=False, length=win_size) # shape luôn là: [B, C, win_size]
+                                return_complex=False, length=win_size) # shape luôn là: [B*C, win_size]
+            recon_x = recon_x.contiguous().view(B, channels, win_size)                # [B, C, win_size]
             Z.append(recon_x)
             
         # Cách 1: Nếu muốn giữ nguyên các chiều đặc trưng độc lập độc lập -> shape: [B, win_size, len(n_fft_ls)+1]
