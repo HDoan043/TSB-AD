@@ -248,7 +248,9 @@ class PDE():
             self.model.train()
             
             loop = tqdm.tqdm(enumerate(train_loader),total=len(train_loader),leave=True)
+            print("hello")
             for i, (batch_x, _) in loop:
+                print("hello2")
                 self.model_optim.zero_grad()
                 
                 batch_x = batch_x.float().to(self.device)
