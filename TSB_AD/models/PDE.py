@@ -32,22 +32,26 @@ class MaskingNetwork(nn.Module):
         in_channels = channels*4
         self.branch1 = nn.Sequential(
             nn.Conv1d(in_channels, d_model, kernel_size=3, padding=1),
-            SinActivation()
+            # SinActivation()
+            nn.ReLU()
         )
         
         self.branch2 = nn.Sequential(
             nn.Conv1d(in_channels, d_model, kernel_size=5, padding=2),
-            SinActivation()
+            # SinActivation()
+            nn.ReLU()
         )
         
         self.branch3 = nn.Sequential(
             nn.Conv1d(in_channels, d_model, kernel_size=3, dilation=2, padding=2),
-            SinActivation()
+            # SinActivation()
+            nn.ReLU()
         )
         
         self.branch4 = nn.Sequential(
             nn.Conv1d(in_channels, d_model, kernel_size=3, dilation=4, padding=4),
-            SinActivation()
+            # SinActivation()
+            nn.ReLU()
         )
         
         self.project = nn.Conv1d(d_model * 4, num_experts*channels, kernel_size=1)
