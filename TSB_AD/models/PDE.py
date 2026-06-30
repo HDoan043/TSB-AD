@@ -297,7 +297,7 @@ class PDE():
                     true = x_norm.detach().cpu()
                     dec_x = dec_x.detach().cpu()
 
-                    loss = self.criterion(true, dec_x, pred)
+                    loss, recon_loss, pure_loss = self.criterion(true, dec_x, pred)
                     total_loss.append(loss.item())
                     loop.set_description(f'Valid Epoch [{epoch}/{self.epochs}]')
                     
