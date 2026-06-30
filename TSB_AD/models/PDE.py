@@ -132,8 +132,8 @@ class Model(nn.Module):
         self.compressor = nn.ModuleList(
             [nn.Sequential(
                 # nn.Conv1d(in_channels=channels, out_channels = 2, kernel_size=4, stride=4, padding=0),
-                nn.Linear(win_size, bottleneck_dim),
-                nn.GELU()) \
+                nn.Linear(win_size, bottleneck_dim))\
+                # nn.GELU()) \
                 # nn.Conv1d(in_channels=2, out_channels=4, kernel_size=4, stride=4, padding=0),
                 # nn.GELU()) \
              for _ in range(self.num_subsequences)])
