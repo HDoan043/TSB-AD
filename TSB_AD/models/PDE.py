@@ -123,17 +123,18 @@ class Model(nn.Module):
         
         self.compressor = nn.ModuleList(
             [nn.Sequential(
-                nn.Conv1d(in_channels=channels, out_channels = 2, kernel_size=4, stride=4, padding=0),
-                nn.GELU(),
-                nn.Conv1d(in_channels=2, out_channels=4, kernel_size=4, stride=4, padding=0),
+                # nn.Conv1d(in_channels=channels, out_channels = 2, kernel_size=4, stride=4, padding=0),
+                nn.Linear(win_size, win_size//4)
                 nn.GELU()) \
+                # nn.Conv1d(in_channels=2, out_channels=4, kernel_size=4, stride=4, padding=0),
+                # nn.GELU()) \
              for _ in range(self.num_subsequences)])
         
         self.decompressor = nn.ModuleList(
-            [nn.Sequential( 
-                nn.ConvTranspose1d(in_channels=4, out_channels=2, kernel_size=4, stride=4, padding=0),
-                nn.GELU(),
-                nn.ConvTranspose1d(in_channels=2, out_channels=channels, kernel_size=4, stride=4, padding=0, bias = False)) \
+            [nn.Sequential( nn.Linear(win_size//4, win_size)) \
+                # nn.ConvTranspose1d(in_channels=4, out_channels=2, kernel_size=4, stride=4, padding=0),
+                # nn.GELU(),
+                # nn.ConvTranspose1d(in_channels=2, out_channels=channels, kernel_size=4, stride=4, padding=0, bias = False)) \
                 for _ in range(self.num_subsequences)])
         
     def forward(self, x): 
@@ -162,7 +163,7 @@ class Model(nn.Module):
         return x_norm, dec_x, x_out
     
 class PureLoss(nn.Module):
-    def __init__(self, lambda_pure=0.05):
+    def __init__(self, lambda_pure=0.1):
         super(PureLoss, self).__init__()
         self.mse = nn.MSELoss()
         self.lambda_pure = lambda_pure
