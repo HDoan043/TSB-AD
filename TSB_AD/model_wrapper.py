@@ -27,19 +27,19 @@ def run_Unsupervise_AD(model_name, data, **kwargs):
 
 
 def run_Semisupervise_AD(model_name, data_train, data_test, **kwargs):
-    try:
-        function_name = f'run_{model_name}'
-        function_to_call = globals()[function_name]
-        results = function_to_call(data_train, data_test, **kwargs)
-        return results
-    except KeyError:
-        error_message = f"Model function '{function_name}' is not defined."
-        print(error_message)
-        return error_message
-    except Exception as e:
-        error_message = f"An error occurred while running the model '{function_name}': {str(e)}"
-        print(error_message)
-        return error_message
+    # try:
+    function_name = f'run_{model_name}'
+    function_to_call = globals()[function_name]
+    results = function_to_call(data_train, data_test, **kwargs)
+    return results
+    # except KeyError:
+    #     error_message = f"Model function '{function_name}' is not defined."
+    #     print(error_message)
+    #     return error_message
+    # # except Exception as e:
+    #     error_message = f"An error occurred while running the model '{function_name}': {str(e)}"
+    #     print(error_message)
+    #     return error_message
 
 def run_PDE(data_train, data_test, win_size=96, d_model =32, top_k=2, num_experts=4):
     from .models.PDE import PDE
