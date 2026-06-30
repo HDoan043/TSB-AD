@@ -23,12 +23,12 @@ class SinActivation(nn.Module):
         return torch.sin(self.omega*x)
     
 class MaskingNetwork(nn.Module):
-    def __init__(self, top_k, d_model, win_size, num_experts):
+    def __init__(self, top_k, d_model, win_size, num_experts, channels=1):
         super(MaskingNetwork, self).__init__()
         self.top_k = top_k
         self.num_experts = num_experts
         self.win_size = win_size
-        in_channels = 4
+        in_channels = channels*4
         self.branch1 = nn.Sequential(
             nn.Conv1d(in_channels, d_model, kernel_size=3, padding=1),
             SinActivation()
@@ -49,12 +49,13 @@ class MaskingNetwork(nn.Module):
             SinActivation()
         )
         
-        self.project = nn.Conv1d(d_model * 4, num_experts, kernel_size=1)
+        self.project = nn.Conv1d(d_model * 4, num_experts*channels, kernel_size=1)
         self.sigmoid = nn.Sigmoid()
         
     def stft_multi_win(self, x):
-        # Đầu vào: x [B, win_size]
-        B, win_size = x.size()
+        # Đầu vào: x [B, win_size, channels]
+        B, win_size, channels = x.size()
+        x = x.permute(0,2,1)                                                        # [B, C, win_size]
         n_fft_ls = [win_size, win_size // 2, win_size // 4]
         hop_length = 1
         Z = [x]
@@ -63,61 +64,62 @@ class MaskingNetwork(nn.Module):
             # 1. Tính số lượng tần số F của khung này
             F = n_fft // 2 + 1
             
-            # 2. Thực hiện STFT -> z có shape: [B, F, T]
+            # 2. Thực hiện STFT -> z có shape: [B, C, F, T]
             z = torch.stft(x, n_fft=n_fft, hop_length=hop_length, win_length=n_fft, 
                             window=None, center=True, return_complex=True)
             
             # 3. Tính biên độ để lấy top K (Đảm bảo K không vượt quá số tần số F)
             a = torch.abs(z)
             current_k = min(self.top_k, F) 
-            _, top_k_indices = torch.topk(a, k=current_k, dim=1) # shape: [B, current_k, T]
+            _, top_k_indices = torch.topk(a, k=current_k, dim=2) # shape: [B, C, current_k, T]
             
             # 4. Trích xuất số phức Top K và dựng lại ma trận lọc nhiễu
-            top_k_z = torch.gather(z, dim=1, index=top_k_indices)
+            top_k_z = torch.gather(z, dim=2, index=top_k_indices)
             filtered_stft = torch.zeros_like(z, device=z.device)
-            filtered_stft.scatter_(dim=1, index=top_k_indices, src=top_k_z)
+            filtered_stft.scatter_(dim=2, index=top_k_indices, src=top_k_z)
             
             # 5. Biến đổi ngược ISTFT
             # CỰC KỲ QUAN TRỌNG: Thêm length=win_size để ép đầu ra các vòng lặp luôn bằng nhau
             recon_x = torch.istft(filtered_stft, n_fft=n_fft, hop_length=hop_length, 
                                 win_length=n_fft, window=None, center=True, 
-                                return_complex=False, length=win_size) # shape luôn là: [B, win_size]
+                                return_complex=False, length=win_size) # shape luôn là: [B, C, win_size]
             Z.append(recon_x)
             
-        # Cách 1: Nếu muốn giữ nguyên các chiều đặc trưng độc lập độc lập -> shape: [B, win_size, k+1]
-        Z = torch.stack(Z, dim=-1).permute(0,2,1)                                   # [B, k+1, win_size] 
+        # Cách 1: Nếu muốn giữ nguyên các chiều đặc trưng độc lập độc lập -> shape: [B, win_size, len(n_fft_ls)+1]
+        Z = torch.cat(Z, dim=1)                                   # [B, C*(len(n_fft_ls)+1), win_size] 
         
         # Cách 2: Nếu muốn nối phẳng các đặc trưng lại với nhau thành 2 chiều -> shape: [B, win_size * 3]
         # Z = torch.cat(Z, dim=-1) 
         
         return Z
 
-    def forward(self, x):                               # [B, win_size]
-        x = self.stft_multi_win(x)                      # [B, k+1, win_size]
+    def forward(self, x):                               # [B, win_size, C]
+        B, win_size, C = x.size()
+        x = self.stft_multi_win(x)                      # [B, C*(k+1), win_size]
         x1 = self.branch1(x)                            # [B, d_model, win_size]
         x2 = self.branch2(x)                            # [B, d_model, win_size]
         x3 = self.branch3(x)                            # [B, d_model, win_size]
         x4 = self.branch4(x)                            # [B, d_model, win_size]
         
         x = torch.cat([x1,x2,x3,x4], dim=1)             # [B, 4*d_model, win_size]
-        x = self.project(x)                             # [B, num_experts, win_size]
-        x = self.sigmoid(x)                             # [B, num_experts, win_size]
+        x = self.project(x)                             # [B, num_experts*C, win_size]
+        x = x.view(B,self.num_experts,C,win_size)       # [B, num_experts, C, win_size]
+        x = self.sigmoid(x)                             # [B, num_experts, C, win_size]
         
         return x
         
-        
 class Model(nn.Module):
-    def __init__(self, win_size, d_model, top_k=2):
+    def __init__(self, win_size, d_model, top_k=2, channels = 1):
         super(Model, self).__init__()
         self.num_subsequences = 4
         self.win_size = win_size
         
         # Định nghĩa bộ tạo mặt nạ (decomposition)
-        self.soft_masking = MaskingNetwork(top_k, d_model, win_size, num_experts=self.num_subsequences)
+        self.soft_masking = MaskingNetwork(top_k, d_model, win_size, num_experts=self.num_subsequences, channels = channels)
         
         self.compressor = nn.ModuleList(
             [nn.Sequential(
-                nn.Conv1d(in_channels=1, out_channels=d_model//2, kernel_size=5, stride=2, padding=2),
+                nn.Conv1d(in_channels=channels, out_channels=d_model//2, kernel_size=5, stride=2, padding=2),
                 SinActivation(),
                 nn.Conv1d(in_channels=d_model // 2, out_channels=d_model, kernel_size=5, stride=2, padding=2),
                 SinActivation()) \
@@ -127,36 +129,36 @@ class Model(nn.Module):
             [nn.Sequential( 
                 nn.ConvTranspose1d(in_channels=d_model, out_channels=d_model//2, kernel_size=4, stride=2, padding=1),
                 SinActivation(),
-                nn.ConvTranspose1d(in_channels=d_model // 2, out_channels=1, kernel_size=4, stride=2, padding=1)) \
+                nn.ConvTranspose1d(in_channels=d_model // 2, out_channels=channels, kernel_size=4, stride=2, padding=1)) \
                 for _ in range(self.num_subsequences)])
         
     def forward(self, x): 
         epsi = 1e-5
-        print(x.size())
-        B, _ = x.size()
+        B, win_size, C = x.size()
         # Giả sử x đầu vào có dạng [B, win_size]
-        x = x/(torch.sqrt((x**2).sum(dim=-1, keepdim=True))+epsi)           # [B, win_size]
-        x_norm = x.clone()
+        x = x/(torch.sqrt((x**2).sum(dim=-1, keepdim=True))+epsi)           # [B, win_size, C]
+        x_norm = x.clone()                                                  # [B, win_size, C]
         
         # Tính toán mặt nạ mềm
-        soft_mask = self.soft_masking(x)                                    # [B, num_subsequences, win_size]
-        x = x.unsqueeze(1)                                                  # [B, 1, win_size]
-        x_masked = x * soft_mask                                            # [B, num_subsequences, win_size]
+        soft_mask = self.soft_masking(x)                                    # [B, num_subsequences, C, win_size]
+        x = x.unsqueeze(1).permute(0,1,3,2)                                 # [B, 1, C, win_size]
+        x_masked = x * soft_mask                                            # [B, num_subsequences, C, win_size]
         
         # Ép qua bộ nén và bộ giải nén dung lượng thấp
         dec_x = []
         for i in range(self.num_subsequences):
-            enc_x = self.compressor[i](x_masked[:, i:i+1, :])               # [B, 1, d_model]       
-            dec_x.append(self.decompressor[i](enc_x))                       # [B, 1, win_size]
-        dec_x = torch.cat(dec_x, dim=1)                                     # [B, num_subsequences, win_size]                                                         
+            enc_x = self.compressor[i](x_masked[:, i, : ,:])                # [B, d_model, win_size//4]       
+            dec_x.append(self.decompressor[i](enc_x))                       # [B, C, win_size]
+        dec_x = torch.stack(dec_x, dim=1)                                   # [B, num_subsequences, C, win_size]
         
         # Tổng hợp tuyến tính (Cộng đại số không học tham số)
-        x_out = dec_x.sum(dim=1)                                            # [B, win_size]
+        x_out = dec_x.sum(dim=1)                                            # [B, C, win_size]
+        x_out = x_out.permute(0,2,1)                                        # [B, win_size, C]
         
         return x_norm, dec_x, x_out
     
 class PureLoss(nn.Module):
-    def __init__(self, lambda_pure=0.1):
+    def __init__(self, lambda_pure=0.5):
         super(PureLoss, self).__init__()
         self.mse = nn.MSELoss()
         self.lambda_pure = lambda_pure
@@ -167,21 +169,23 @@ class PureLoss(nn.Module):
         recon_loss = self.mse(batch_x_norm, batch_x_out)
         
         # 2. Tính ma trận Cosine tương quan bình phương
-        batch_dec_x_norm = batch_dec_x / torch.sqrt((batch_dec_x ** 2).sum(dim=-1, keepdim=True) + eps) 
-        cos_sim_matrix = batch_dec_x_norm @ batch_dec_x_norm.permute(0, 2, 1)
+        batch_dec_x_norm = batch_dec_x / torch.sqrt((batch_dec_x ** 2).sum(dim=-1, keepdim=True) + eps)     # [B, num_experts, C, win_size]
+        batch_dec_x_norm = batch_dec_x_norm.permute(0,2,1,3)                                                # [B, C, num_experts, win_size]
+        cos_sim_matrix = batch_dec_x_norm @ batch_dec_x_norm.permute(0, 1, 3, 2)                            # [B, C, num_experts, num_experts]
         cos_sim_matrix_sq = cos_sim_matrix ** 2
         
         # 3. Xóa đường chéo chính
         num_sub = batch_dec_x.size(1)
         diagonal_mask = torch.eye(num_sub, device=batch_dec_x.device).unsqueeze(0)
         cos_sim_matrix_sq = cos_sim_matrix_sq * (1 - diagonal_mask)
-        
-        pure_loss = cos_sim_matrix_sq.sum() / batch_x_norm.size(0)
+
+        # pure loss trung bình trên các kênh của các mẫu trong 1 batch
+        pure_loss = cos_sim_matrix_sq.sum() / (batch_x_norm.size(0)*batch_x_norm.size(-1))
         
         # 4. Cộng tổng hợp có trọng số
-        total_loss = recon_loss + pure_loss
+        total_loss = recon_loss + self.lambda_pure*pure_loss
         
-        return total_loss.item()
+        return total_loss
 
 class PDE():
     '''
@@ -190,6 +194,7 @@ class PDE():
     def __init__(self, 
                  win_size=96,
                  d_model =32,
+                 channels=1,
                  top_k=2,
                  num_experts=4,
                  epochs=10,
@@ -218,13 +223,13 @@ class PDE():
         self.cuda = cuda
         self.device = get_gpu(self.cuda)
             
-        self.model = Model(win_size, d_model, top_k).float().to(self.device)
+        self.model = Model(win_size, d_model, top_k, channels = channels).float().to(self.device)
         self.model_optim = optim.Adam(self.model.parameters(), lr=self.lr)
         self.criterion = PureLoss()
         
         self.early_stopping = EarlyStoppingTorch(None, patience=self.patience)
         
-        self.input_shape = (self.batch_size, self.win_size)
+        self.input_shape = (self.batch_size, self.win_size, channels)
 
     def fit(self, data):
         tsTrain = data[:int((1-self.validation_size)*len(data))]
@@ -254,11 +259,8 @@ class PDE():
                 
                 batch_x = batch_x.float().to(self.device)
                 out = self.model(batch_x)
-                print(out.shape)
                 x_norm, dec_x, x_recon = out
-                print("hello2")
                 loss = self.criterion(x_norm, dec_x, x_recon)
-                print("hello3")
                 loss.backward()
                 self.model_optim.step()
                 
@@ -285,7 +287,7 @@ class PDE():
                     dec_x = dec_x.detach().cpu()
 
                     loss = self.criterion(true, dec_x, pred)
-                    total_loss.append(loss)
+                    total_loss.append(loss.item())
                     loop.set_description(f'Valid Epoch [{epoch}/{self.epochs}]')
                     
             valid_loss = np.average(total_loss)
@@ -316,11 +318,10 @@ class PDE():
                 # reconstruction
                 x_norm, _, outputs = self.model(batch_x)
                 # criterion
-                score = torch.mean(self.anomaly_criterion(x_norm, outputs), dim=-1)
+                score = torch.mean(self.anomaly_criterion(x_norm, outputs), dim=-1)    # [B, win_size]
                 y_hat = torch.squeeze(outputs, -1)
 
-                # score = score.mean(dim=1).detach().cpu().numpy()
-                score = score.detach().cpu().numpy()
+                score = score.mean(dim=1).detach().cpu().numpy()
                 y_hat = y_hat.detach().cpu().numpy()[:, self.win_size // 2]
                 
                 attens_energy.append(score)
