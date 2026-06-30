@@ -108,7 +108,7 @@ class MaskingNetwork(nn.Module):
         x = torch.cat([x1,x2,x3,x4], dim=1)             # [B, 4*d_model, win_size]
         x = self.project(x)                             # [B, num_experts*C, win_size]
         x = x.view(B,self.num_experts,C,win_size)       # [B, num_experts, C, win_size]
-        x = self.sofmax(x)                              # [B, num_experts, C, win_size]
+        x = self.softmax(x)                             # [B, num_experts, C, win_size]
         
         return x
         
