@@ -123,17 +123,17 @@ class Model(nn.Module):
         
         self.compressor = nn.ModuleList(
             [nn.Sequential(
-                nn.Conv1d(in_channels=channels, out_channels=d_model//2, kernel_size=5, stride=2, padding=2),
+                nn.Conv1d(in_channels=channels, 2, kernel_size=4, stride=4, padding=0),
                 nn.GELU(),
-                nn.Conv1d(in_channels=d_model // 2, out_channels=d_model, kernel_size=5, stride=2, padding=2),
+                nn.Conv1d(in_channels=2, out_channels=4, kernel_size=4, stride=4, padding=0),
                 nn.GELU()) \
              for _ in range(self.num_subsequences)])
         
         self.decompressor = nn.ModuleList(
             [nn.Sequential( 
-                nn.ConvTranspose1d(in_channels=d_model, out_channels=d_model//2, kernel_size=4, stride=2, padding=1),
+                nn.ConvTranspose1d(in_channels=4, out_channels=2, kernel_size=4, stride=4, padding=0),
                 nn.GELU(),
-                nn.ConvTranspose1d(in_channels=d_model // 2, out_channels=channels, kernel_size=4, stride=2, padding=1, bias = False)) \
+                nn.ConvTranspose1d(in_channels=2, out_channels=channels, kernel_size=4, stride=4, padding=0, bias = False)) \
                 for _ in range(self.num_subsequences)])
         
     def forward(self, x): 
