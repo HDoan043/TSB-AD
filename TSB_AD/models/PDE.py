@@ -115,7 +115,7 @@ class MaskingNetwork(nn.Module):
 class Model(nn.Module):
     def __init__(self, win_size, d_model, top_k=2, channels = 1):
         super(Model, self).__init__()
-        self.num_subsequences = 4
+        self.num_subsequences = 2
         self.win_size = win_size
         
         # Định nghĩa bộ tạo mặt nạ (decomposition)
@@ -162,7 +162,7 @@ class Model(nn.Module):
         return x_norm, dec_x, x_out
     
 class PureLoss(nn.Module):
-    def __init__(self, lambda_pure=1.0):
+    def __init__(self, lambda_pure=0.5):
         super(PureLoss, self).__init__()
         self.mse = nn.MSELoss()
         self.lambda_pure = lambda_pure
