@@ -68,7 +68,7 @@ class MaskingNetwork(nn.Module):
             # 2. Thực hiện STFT -> z có shape: [B*C, F, T]
             current_window = torch.ones(n_fft, device=x.device)
             z = torch.stft(x, n_fft=n_fft, hop_length=hop_length, win_length=n_fft, 
-                            window=current_window, center=True, return_complex=True)
+                            window=None, center=True, return_complex=True)
             
             # 3. Tính biên độ để lấy top K (Đảm bảo K không vượt quá số tần số F)
             a = torch.abs(z)
@@ -83,7 +83,7 @@ class MaskingNetwork(nn.Module):
             # 5. Biến đổi ngược ISTFT
             # CỰC KỲ QUAN TRỌNG: Thêm length=win_size để ép đầu ra các vòng lặp luôn bằng nhau
             recon_x = torch.istft(filtered_stft, n_fft=n_fft, hop_length=hop_length, 
-                                win_length=n_fft, window=current_window, center=True, 
+                                win_length=n_fft, window=None, center=True, 
                                 return_complex=False, length=win_size) # shape luôn là: [B*C, win_size]
             recon_x = recon_x.contiguous().view(B, channels, win_size)                # [B, C, win_size]
             Z.append(recon_x)
