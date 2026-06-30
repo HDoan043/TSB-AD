@@ -132,6 +132,7 @@ class Model(nn.Module):
         
     def forward(self, x): 
         epsi = 1e-5
+        print(x.size())
         B, _ = x.size()
         # Giả sử x đầu vào có dạng [B, win_size]
         x = x/(torch.sqrt((x**2).sum(dim=-1, keepdim=True))+epsi)           # [B, win_size]
