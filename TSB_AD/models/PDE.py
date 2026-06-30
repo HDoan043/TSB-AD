@@ -104,15 +104,16 @@ class MaskingNetwork(nn.Module):
     def forward(self, x):                               # [B, win_size, C]
         B, win_size, C = x.size()
         x = self.stft_multi_win(x)                      # [B, C*(k+1), win_size]
-        x1 = self.branch1(x)                            # [B, d_model, win_size]
-        x2 = self.branch2(x)                            # [B, d_model, win_size]
-        x3 = self.branch3(x)                            # [B, d_model, win_size]
-        x4 = self.branch4(x)                            # [B, d_model, win_size]
+        x = 
+        # x1 = self.branch1(x)                            # [B, d_model, win_size]
+        # x2 = self.branch2(x)                            # [B, d_model, win_size]
+        # x3 = self.branch3(x)                            # [B, d_model, win_size]
+        # x4 = self.branch4(x)                            # [B, d_model, win_size]
         
-        x = torch.cat([x1,x2,x3,x4], dim=1)             # [B, 4*d_model, win_size]
-        x = self.project(x)                             # [B, num_experts*C, win_size]
-        x = x.view(B,self.num_experts,C,win_size)       # [B, num_experts, C, win_size]
-        x = self.softmax(x)                             # [B, num_experts, C, win_size]
+        # x = torch.cat([x1,x2,x3,x4], dim=1)             # [B, 4*d_model, win_size]
+        # x = self.project(x)                             # [B, num_experts*C, win_size]
+        # x = x.view(B,self.num_experts,C,win_size)       # [B, num_experts, C, win_size]
+        # x = self.softmax(x)                             # [B, num_experts, C, win_size]
         
         return x
         
@@ -153,9 +154,10 @@ class Model(nn.Module):
         x_norm = x.clone()                                                  # [B, win_size, C]
         
         # Tính toán mặt nạ mềm
-        soft_mask = self.soft_masking(x)                                    # [B, num_subsequences, C, win_size]
-        x = x.unsqueeze(1).permute(0,1,3,2)                                 # [B, 1, C, win_size]
-        x_masked = x * soft_mask                                            # [B, num_subsequences, C, win_size]
+        # soft_mask = self.soft_masking(x)                                    # [B, num_subsequences, C, win_size]
+        # x = x.unsqueeze(1).permute(0,1,3,2)                                 # [B, 1, C, win_size]
+        # x_masked = x * soft_mask                                            # [B, num_subsequences, C, win_size]
+        x_masked = x.permute(0,2,1)                                         # [B, C, win_size]
         
         # Ép qua bộ nén và bộ giải nén dung lượng thấp
         dec_x = []
