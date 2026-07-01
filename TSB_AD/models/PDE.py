@@ -104,15 +104,15 @@ class MaskingNetwork(nn.Module):
     def forward(self, x):                               # [B, win_size, C]
         B, win_size, C = x.size()
         x = self.stft_multi_win(x)                      # [B, C*(k+1), win_size]
-        # x1 = self.branch1(x)                            # [B, d_model, win_size]
-        # x2 = self.branch2(x)                            # [B, d_model, win_size]
-        # x3 = self.branch3(x)                            # [B, d_model, win_size]
-        # x4 = self.branch4(x)                            # [B, d_model, win_size]
+        x1 = self.branch1(x)                            # [B, d_model, win_size]
+        x2 = self.branch2(x)                            # [B, d_model, win_size]
+        x3 = self.branch3(x)                            # [B, d_model, win_size]
+        x4 = self.branch4(x)                            # [B, d_model, win_size]
         
-        # x = torch.cat([x1,x2,x3,x4], dim=1)             # [B, 4*d_model, win_size]
-        # x = self.project(x)                             # [B, num_experts*C, win_size]
-        # x = x.view(B,self.num_experts,C,win_size)       # [B, num_experts, C, win_size]
-        # x = self.softmax(x)                             # [B, num_experts, C, win_size]
+        x = torch.cat([x1,x2,x3,x4], dim=1)             # [B, 4*d_model, win_size]
+        x = self.project(x)                             # [B, num_experts*C, win_size]
+        x = x.view(B,self.num_experts,C,win_size)       # [B, num_experts, C, win_size]
+        x = self.softmax(x)                             # [B, num_experts, C, win_size]
         
         return x
         
@@ -153,16 +153,16 @@ class Model(nn.Module):
         x_norm = x.clone()                                                  # [B, win_size, C]
         
         # Tính toán mặt nạ mềm
-        # soft_mask = self.soft_masking(x)                                    # [B, num_subsequences, C, win_size]
-        # x = x.unsqueeze(1).permute(0,1,3,2)                                 # [B, 1, C, win_size]
-        # x_masked = x * soft_mask                                            # [B, num_subsequences, C, win_size]
-        x_masked = x.permute(0,2,1)                                         # [B, C, win_size]
+        soft_mask = self.soft_masking(x)                                    # [B, num_subsequences, C, win_size]
+        x = x.unsqueeze(1).permute(0,1,3,2)                                 # [B, 1, C, win_size]
+        x_masked = x * soft_mask                                            # [B, num_subsequences, C, win_size]
+        # x_masked = x.permute(0,2,1)                                         # [B, C, win_size]
         
         # Ép qua bộ nén và bộ giải nén dung lượng thấp
         dec_x = []
         for i in range(self.num_subsequences):
-            # enc_x = self.compressor[i](x_masked[:, i, : ,:])                # [B, d_model, win_size//4]     
-            enc_x = self.compressor[i](x_masked)                            # [B, C, d_model]
+            enc_x = self.compressor[i](x_masked[:, i, : ,:])                # [B, d_model, win_size//4]     
+            # enc_x = self.compressor[i](x_masked)                            # [B, C, d_model]
             dec_x.append(self.decompressor[i](enc_x))                       # [B, C, win_size]
         dec_x = torch.stack(dec_x, dim=1)                                   # [B, num_subsequences, C, win_size]
         
@@ -173,10 +173,11 @@ class Model(nn.Module):
         return x_norm, dec_x, x_out
     
 class PureLoss(nn.Module):
-    def __init__(self, lambda_pure=1.0):
+    def __init__(self, lambda_pure=1.0, lambda_var=0.5):
         super(PureLoss, self).__init__()
         self.mse = nn.MSELoss()
         self.lambda_pure = lambda_pure
+        self.lambda_var = lambda_var
     
     def forward(self, batch_x_norm, batch_dec_x, batch_x_out): 
         eps = 1e-5
@@ -197,11 +198,15 @@ class PureLoss(nn.Module):
         # pure loss trung bình trên các kênh của các mẫu trong 1 batch
         num_pairs = num_sub * (num_sub - 1)
         pure_loss = cos_sim_matrix_sq.sum() / (batch_x_norm.size(0) * batch_x_norm.size(-1) * num_pairs)
+
+        # phạt nghiệm tầm thường
+        expert_std = batch_dec_x.std(dim=-1) # [B, num_experts, C]
+        var_penalty = torch.mean(1.0 / (expert_std + eps))
         
         # 4. Cộng tổng hợp có trọng số
-        total_loss = recon_loss + self.lambda_pure*pure_loss
+        total_loss = recon_loss + self.lambda_pure*pure_loss + self.lambda_var*var_penalty
         
-        return total_loss, recon_loss, pure_loss
+        return total_loss, recon_loss, pure_loss, var_penalty
 
 class PDE():
     '''
@@ -271,6 +276,7 @@ class PDE():
             train_loss = 0
             train_recon_loss = 0
             train_pure_loss = 0
+            train_var_loss = 0
             self.model.train()
             
             loop = tqdm.tqdm(enumerate(train_loader),total=len(train_loader),leave=True)
@@ -280,16 +286,18 @@ class PDE():
                 batch_x = batch_x.float().to(self.device)
                 out = self.model(batch_x)
                 x_norm, dec_x, x_recon = out
-                loss, recon_loss, pure_loss = self.criterion(x_norm, dec_x, x_recon)
+                loss, recon_loss, pure_loss, var_loss = self.criterion(x_norm, dec_x, x_recon)
                 loss.backward()
                 self.model_optim.step()
                 
                 train_loss += loss.cpu().item()
                 train_recon_loss += recon_loss.cpu().item()
                 train_pure_loss += pure_loss.cpu().item()
+                train_var_loss += var_loss.cpu().item()
                 
                 loop.set_description(f'Training Epoch [{epoch}/{self.epochs}]')
-                loop.set_postfix(loss=loss.item(), avg_loss=train_loss/(i+1), avg_recon_loss=train_recon_loss/(i+1), avg_pure_loss=train_pure_loss/(i+1))
+                loop.set_postfix(loss=loss.item(), avg_loss=train_loss/(i+1), avg_recon_loss=train_recon_loss/(i+1), 
+                                 avg_pure_loss=train_pure_loss/(i+1), avg_var_loss = train_var_loss/(i+1))
             
             ## Validation
             self.model.eval()
@@ -308,7 +316,7 @@ class PDE():
                     true = x_norm.detach().cpu()
                     dec_x = dec_x.detach().cpu()
 
-                    loss, recon_loss, pure_loss = self.criterion(true, dec_x, pred)
+                    loss, recon_loss, pure_loss, _ = self.criterion(true, dec_x, pred)
                     total_loss.append(loss.item())
                     loop.set_description(f'Valid Epoch [{epoch}/{self.epochs}]')
                     
