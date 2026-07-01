@@ -41,9 +41,10 @@ def run_Semisupervise_AD(model_name, data_train, data_test, **kwargs):
         print(error_message)
         return error_message
 
-def run_PDE(data_train, data_test, win_size=96, d_model =32, top_k=3, num_experts=4):
+def run_PDE(data_train, data_test, win_size=96, d_model =32, top_k=3, num_experts=4, lambda_pure=0.1, lambda_var=0.005):
     from .models.PDE import PDE
-    clf = PDE(win_size = win_size, d_model=d_model, channels=data_test.shape[1], top_k=top_k, num_experts=num_experts, lr = 1e-4, epochs = 50)
+    clf = PDE(win_size = win_size, d_model=d_model, channels=data_test.shape[1], top_k=top_k, 
+              num_experts=num_experts, lambda_pure=0.1, lambda_var=0.005, lr = 1e-4, epochs = 50)
     clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
