@@ -29,7 +29,7 @@ class MaskingNetwork(nn.Module):
         self.top_k = top_k
         self.num_experts = num_experts
         self.win_size = win_size
-        in_channels = channels*4
+        in_channels = channels
         self.branch1 = nn.Sequential(
             nn.Conv1d(in_channels, d_model, kernel_size=3, padding=1),
             # SinActivation()
@@ -103,7 +103,8 @@ class MaskingNetwork(nn.Module):
 
     def forward(self, x):                               # [B, win_size, C]
         B, win_size, C = x.size()
-        x = self.stft_multi_win(x)                      # [B, C*(k+1), win_size]
+        # x = self.stft_multi_win(x)                      # [B, C*(k+1), win_size]
+        x = x.permute(0,2,1)                            # [B, C, win_size]
         x1 = self.branch1(x)                            # [B, d_model, win_size]
         x2 = self.branch2(x)                            # [B, d_model, win_size]
         x3 = self.branch3(x)                            # [B, d_model, win_size]
