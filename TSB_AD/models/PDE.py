@@ -219,6 +219,8 @@ class PDE():
                  channels=1,
                  top_k=2,
                  num_experts=4,
+                 lambda_pure=0.1,
+                 lambda_var =0.005,
                  epochs=10,
                  batch_size=128,
                  lr=1e-4,
@@ -247,7 +249,7 @@ class PDE():
             
         self.model = Model(win_size, d_model, top_k, channels = channels, num_experts = num_experts).float().to(self.device)
         self.model_optim = optim.Adam(self.model.parameters(), lr=self.lr)
-        self.criterion = PureLoss()
+        self.criterion = PureLoss(lambda_pure=lambda_pure, lambda_var=lambda_var)
         
         self.early_stopping = EarlyStoppingTorch(None, patience=self.patience)
         
