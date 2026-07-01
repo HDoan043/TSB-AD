@@ -22,7 +22,7 @@ class SinActivation(nn.Module):
         self.omega = nn.Parameter(torch.tensor(omega))
     def forward(self, x):
         return torch.sin(self.omega*x)
-    
+
 class MaskingNetwork(nn.Module):
     def __init__(self, top_k, d_model, win_size, num_experts, channels=1):
         super(MaskingNetwork, self).__init__()
@@ -116,6 +116,16 @@ class MaskingNetwork(nn.Module):
         x = self.softmax(x)                             # [B, num_experts, C, win_size]
         
         return x
+
+class WaveExpert(nn.Module):
+    def __init__(self):
+        super(Expert, self).__init__()
+    def forward(self, x):                                # [B, C, win_size]
+        fft_x = torch.fft.rfft(x, dim=-1)                # [B, C, win_size]
+        amplitude = torch.abs(fft_x)                     # [B, C, win_size]
+        angle = torch.angle(fft_x)                       # [B, C, win_size]
+        x = torch.stack([amplitude, angle], dim=2)       # [B, C, 2, win_size]
+        
         
 class Model(nn.Module):
     def __init__(self, win_size, d_model, top_k=2, channels = 1, num_experts = 4):
