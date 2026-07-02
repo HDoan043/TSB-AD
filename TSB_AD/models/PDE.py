@@ -147,7 +147,8 @@ class WaveExpert(nn.Module):
         magnitude = torch.abs(fft_x)                     # [B, C, fft_len]
         real = fft_x.real                                # [B, C, fft_len]
         imag = fft_x.imag                                # [B, C, fft_len]
-        
+
+        print("hello1")
         # 1. Trích xuất tần số f (số chu kỳ trong cửa sổ)
         f = self.compress_f(magnitude) * self.range_size # [B, C, 1]
         
@@ -159,7 +160,7 @@ class WaveExpert(nn.Module):
         amplitude = self.compress_amplitude(amplitude)   # [B*C, 2, 1]
         amplitude = amplitude.squeeze(-1)                # [B*C, 2]
         amplitude = amplitude.contiguous().view(B, C, 2) # [B, C, 2]
-        
+        print("Hello2")
         # 3. Quản lý Timestamps (Bắt buộc dùng Local Time: 0 -> win_size - 1)
         if local_timestamps is None:
             # Tự động tạo nếu không truyền vào
@@ -178,7 +179,7 @@ class WaveExpert(nn.Module):
         I = amplitude[:, :, 1:] # [B, C, 1]
         
         recon_x = R * torch.cos(theta) + I * torch.sin(theta)   # [B, C, win_size]
-
+        print("hello3")
         return recon_x
 
 class FreeExpert(nn.Module):
