@@ -8,7 +8,7 @@ from .utils.slidingWindows import find_length_rank
 Unsupervise_AD_Pool = ['FFT', 'SR', 'NORMA', 'Series2Graph', 'Sub_IForest', 'IForest', 'LOF', 'Sub_LOF', 'POLY', 'MatrixProfile', 'Sub_PCA', 'PCA', 'HBOS',
                         'Sub_HBOS', 'KNN', 'Sub_KNN','KMeansAD', 'KMeansAD_U', 'KShapeAD', 'COPOD', 'CBLOF', 'COF', 'EIF', 'RobustPCA', 'MMPAD', 'Lag_Llama', 'TimesFM', 'Chronos', 'MOMENT_ZS', 'TSPulse_ZS', 'Time_RCD']
 Semisupervise_AD_Pool = ['Left_STAMPi', 'SAND', 'MCD', 'Sub_MCD', 'OCSVM', 'Sub_OCSVM', 'AutoEncoder', 'CNN', 'LSTMAD', 'TranAD', 'USAD', 'OmniAnomaly', 'PatchTST',
-                        'AnomalyTransformer', 'TimesNet', 'FITS', 'Donut', 'OFA', 'MOMENT_FT', 'M2N2', 'TSPulse_FT', 'xLSTMAD', 'CHARM', 'StreamVAE', 'MTSC', "PDE"]
+                        'AnomalyTransformer', 'TimesNet', 'FITS', 'Donut', 'OFA', 'MOMENT_FT', 'M2N2', 'TSPulse_FT', 'xLSTMAD', 'CHARM', 'StreamVAE', 'MTSC', "PDE", 'DualStreamAD']
 
 def run_Unsupervise_AD(model_name, data, **kwargs):
     try:
@@ -589,3 +589,33 @@ def run_CHARM(
         MinMaxScaler(feature_range=(0, 1)).fit_transform(score.reshape(-1, 1)).ravel()
     )
     return score
+
+ef run_DualStreamAD(data_train, data_test, window_size=100, pred_len=1,
+                     hidden_dim=64, lstm_hidden=32, num_layers=2,
+                     lr=1e-3, alpha=0.3, freq_weight=0.1,
+                     adv_weight=0.0, temp_exclude_radius=None,
+                     mask_ratio=0.3, mask_weight=0.7,
+                     freq_mask_weight=0.03, freq_mask_bands=8,
+                     rbf_n_centers=32, rbf_weight=0.01,
+                     idem_weight=0.1,
+                     flow_weight=0.25, flow_epochs=200,
+                     batch_size=128, epochs=50, max_train_windows=0):
+    from .models.DualStreamAD import DualStreamAD
+    clf = DualStreamAD(window_size=window_size, pred_len=pred_len,
+                       feats=data_test.shape[1], hidden_dim=hidden_dim,
+                       lstm_hidden=lstm_hidden, num_layers=num_layers,
+                       lr=lr, alpha=alpha, freq_weight=freq_weight,
+                       adv_weight=adv_weight,
+                       temp_exclude_radius=temp_exclude_radius,
+                       mask_ratio=mask_ratio, mask_weight=mask_weight,
+                       freq_mask_weight=freq_mask_weight,
+                       freq_mask_bands=freq_mask_bands,
+                       rbf_n_centers=rbf_n_centers,
+                       rbf_weight=rbf_weight,
+                       idem_weight=idem_weight,
+                       flow_weight=flow_weight, flow_epochs=flow_epochs,
+                       batch_size=batch_size, epochs=epochs,
+                       max_train_windows=max_train_windows)
+    clf.fit(data_train)
+    score = clf.decision_function(data_test)
+    return score.ravel()
