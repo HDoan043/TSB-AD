@@ -221,12 +221,10 @@ class Model(nn.Module):
         dec_x = []
         for expert in self.experts:
             dec_x.append(expert(x))                                         # [B, C, win_size]
-        print("Hello1")
         dec_x = torch.stack(dec_x, dim=1)                                   # [B, num_subsequences, C, win_size]
         
         # Tổng hợp tuyến tính (Cộng đại số không học tham số)
         x_out = dec_x.sum(dim=1)                                            # [B, C, win_size]
-        print("Hello2")
         x_out = x_out.permute(0,2,1)                                        # [B, win_size, C]
         
         return x_norm, dec_x, x_out
@@ -347,7 +345,7 @@ class PDE():
                 batch_x = batch_x.float().to(self.device)
                 out = self.model(batch_x)
                 x_norm, dec_x, x_recon = out
-                loss, recon_loss, pure_loss, var_loss = self.criterion(x_norm, dec_x, x_recon)
+                loss = self.criterion(x_norm, dec_x, x_recon)
                 loss.backward()
                 self.model_optim.step()
                 
@@ -378,7 +376,7 @@ class PDE():
                     true = x_norm.detach().cpu()
                     dec_x = dec_x.detach().cpu()
 
-                    loss, recon_loss, pure_loss, _ = self.criterion(true, dec_x, pred)
+                    loss = self.criterion(true, dec_x, pred)
                     total_loss.append(loss.item())
                     loop.set_description(f'Valid Epoch [{epoch}/{self.epochs}]')
                     
