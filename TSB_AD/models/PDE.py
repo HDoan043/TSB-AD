@@ -219,11 +219,11 @@ class Model(nn.Module):
         x = x_norm.clone()
         
         x = x.permute(0,2,1)                                                # [B, C, win_size]
-        
+        print("hello")
         # Ép qua bộ nén và bộ giải nén dung lượng thấp
         dec_x = []
-        for i in range(self.num_subsequences):
-            dec_x.append(self.experts[i](x))                                # [B, C, win_size]
+        for expert in self.experts:
+            dec_x.append(self.expert(x))                                    # [B, C, win_size]
         dec_x = torch.stack(dec_x, dim=1)                                   # [B, num_subsequences, C, win_size]
         
         # Tổng hợp tuyến tính (Cộng đại số không học tham số)
