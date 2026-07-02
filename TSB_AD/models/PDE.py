@@ -203,13 +203,6 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.num_subsequences = num_experts
         self.win_size = win_size
-        
-        # Định nghĩa bộ tạo mặt nạ (decomposition)
-        self.soft_masking = MaskingNetwork(top_k, d_model, win_size, num_experts=self.num_subsequences, channels = channels)
-        # TÍNH TOÁN NÚT THẮT CỔ CHAI THỰC SỰ
-        # Đảm bảo tổng dung lượng (bottleneck_dim * num_experts) chỉ bằng win_size // 2
-        bottleneck_dim = win_size // (self.num_subsequences * 2) 
-        bottleneck_dim = max(1, bottleneck_dim) # Đảm bảo ít nhất là 1 chiều
 
         num_free_expert = max(1, int(0.4*num_experts))
         num_wave_expert = num_experts - num_free_expert
@@ -220,17 +213,17 @@ class Model(nn.Module):
     def forward(self, x): 
         epsi = 1e-5
         B, win_size, C = x.size()
-        # Giả sử x đầu vào có dạng [B, win_size]
-        x = x/(torch.sqrt((x**2).sum(dim=1, keepdim=True))+epsi)            # [B, win_size, C]
-        x_norm = x.clone()                                                  # [B, win_size, C]
+        mean = x.mean(dim=1, keepdim=True)
+        std = x.std(dim=1, keepdim=True)
+        x_norm = (x - mean) / (std + epsi)
+        x = x_norm.clone()
         
         x = x.permute(0,2,1)                                                # [B, C, win_size]
-        x_masked = x.squeeze(1).repeat(1,self.num_subsequences,1,1)         # [B, num_subsequences, C, win_size]
         
         # Ép qua bộ nén và bộ giải nén dung lượng thấp
         dec_x = []
         for i in range(self.num_subsequences):
-            dec_x.append(self.experts[i](x_masked[:, i, : ,:]))               # [B, C, win_size]
+            dec_x.append(self.experts[i](x))                                # [B, C, win_size]
         dec_x = torch.stack(dec_x, dim=1)                                   # [B, num_subsequences, C, win_size]
         
         # Tổng hợp tuyến tính (Cộng đại số không học tham số)
@@ -274,8 +267,7 @@ class PureLoss(nn.Module):
         # total_loss = recon_loss + self.lambda_pure*pure_loss + self.lambda_var*var_penalty
         total_loss = recon_loss
         
-        return total_loss, recon_loss, pure_loss, var_penalty
-
+        return total_loss
 class PDE():
     '''
     PDE - Pure Decomposition Expert
@@ -361,13 +353,14 @@ class PDE():
                 self.model_optim.step()
                 
                 train_loss += loss.cpu().item()
-                train_recon_loss += recon_loss.cpu().item()
-                train_pure_loss += pure_loss.cpu().item()
-                train_var_loss += var_loss.cpu().item()
+                # train_recon_loss += recon_loss.cpu().item()
+                # train_pure_loss += pure_loss.cpu().item()
+                # train_var_loss += var_loss.cpu().item()
                 
                 loop.set_description(f'Training Epoch [{epoch}/{self.epochs}]')
-                loop.set_postfix(loss=loss.item(), avg_loss=train_loss/(i+1), avg_recon_loss=train_recon_loss/(i+1), 
-                                 avg_pure_loss=train_pure_loss/(i+1), avg_var_loss = train_var_loss/(i+1))
+                # loop.set_postfix(loss=loss.item(), avg_loss=train_loss/(i+1), avg_recon_loss=train_recon_loss/(i+1), 
+                #                  avg_pure_loss=train_pure_loss/(i+1), avg_var_loss = train_var_loss/(i+1))
+                loop.set_postfix(loss=loss.item(), avg_loss=train_loss/(i+1))
             
             ## Validation
             self.model.eval()
