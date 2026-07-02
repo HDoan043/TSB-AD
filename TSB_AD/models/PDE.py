@@ -275,7 +275,7 @@ class PureLoss(nn.Module):
         
         # 4. Cộng tổng hợp có trọng số
         # total_loss = recon_loss + self.lambda_pure*pure_loss + self.lambda_var*var_penalty
-        total_loss = recon_loss + self.lambda_pure*pure_loss 
+        total_loss = recon_loss
         
         return total_loss, recon_loss, pure_loss, var_penalty
 
