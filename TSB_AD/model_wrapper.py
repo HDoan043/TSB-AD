@@ -590,7 +590,7 @@ def run_CHARM(
     )
     return score
 
-ef run_DualStreamAD(data_train, data_test, window_size=100, pred_len=1,
+def run_DualStreamAD(data_train, data_test, window_size=100, pred_len=1,
                      hidden_dim=64, lstm_hidden=32, num_layers=2,
                      lr=1e-3, alpha=0.3, freq_weight=0.1,
                      adv_weight=0.0, temp_exclude_radius=None,
