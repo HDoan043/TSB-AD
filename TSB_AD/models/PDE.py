@@ -208,7 +208,7 @@ class Model(nn.Module):
         bottleneck_dim = win_size // (self.num_subsequences * 2) 
         bottleneck_dim = max(1, bottleneck_dim) # Đảm bảo ít nhất là 1 chiều
 
-        num_free_expert = max(1, 0.4*num_experts)
+        num_free_expert = max(1, int(0.4*num_experts))
         num_wave_expert = num_experts - num_free_expert
         experts = [WaveExpert(win_size) for _ in range(num_wave_expert)]
         experts.extend([FreeExpert(win_size) for _ in range(num_free_expert)])
