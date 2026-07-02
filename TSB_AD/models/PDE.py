@@ -118,14 +118,82 @@ class MaskingNetwork(nn.Module):
         return x
 
 class WaveExpert(nn.Module):
-    def __init__(self):
-        super(Expert, self).__init__()
-    def forward(self, x):                                # [B, C, win_size]
-        fft_x = torch.fft.rfft(x, dim=-1)                # [B, C, win_size]
-        amplitude = torch.abs(fft_x)                     # [B, C, win_size]
-        angle = torch.angle(fft_x)                       # [B, C, win_size]
-        x = torch.stack([amplitude, angle], dim=2)       # [B, C, 2, win_size]
+    def __init__(self, win_size):
+        super(WaveExpert, self).__init__() # Sửa lỗi tên class
+        self.win_size = win_size
         
+        # Công thức chuẩn xác 100% của pytorch rfft: N // 2 + 1
+        self.fft_len = win_size // 2 + 1  
+        self.range_size = win_size // 2
+        
+        self.compress_f = nn.Sequential(
+            nn.Linear(self.fft_len, 1),
+            nn.Sigmoid()
+        )
+        
+        # Sửa lại in_channels=2, kernel_size=fft_len
+        self.compress_amplitude = nn.Sequential(
+            nn.Conv1d(in_channels=2, out_channels=2, kernel_size=self.fft_len)
+        )
+
+    def forward(self, x, local_timestamps=None):
+        # x: [B, C, win_size]
+        B, C, win_size = x.size()
+        
+        fft_x = torch.fft.rfft(x, dim=-1)                # [B, C, fft_len]
+        magnitude = torch.abs(fft_x)                     # [B, C, fft_len]
+        real = fft_x.real                                # [B, C, fft_len]
+        imag = fft_x.imag                                # [B, C, fft_len]
+        
+        # 1. Trích xuất tần số f (số chu kỳ trong cửa sổ)
+        f = self.compress_f(magnitude) * self.range_size # [B, C, 1]
+        
+        # 2. Trích xuất biên độ R và pha I
+        amplitude = torch.stack([real, imag], dim=2)     # [B, C, 2, fft_len]
+        
+        # SỬA LỖI: view thành 2 kênh và chiều dài fft_len
+        amplitude = amplitude.contiguous().view(B*C, 2, self.fft_len) # [B*C, 2, fft_len]
+        amplitude = self.compress_amplitude(amplitude)   # [B*C, 2, 1]
+        amplitude = amplitude.squeeze(-1)                # [B*C, 2]
+        amplitude = amplitude.contiguous().view(B, C, 2) # [B, C, 2]
+        
+        # 3. Quản lý Timestamps (Bắt buộc dùng Local Time: 0 -> win_size - 1)
+        if local_timestamps is None:
+            # Tự động tạo nếu không truyền vào
+            local_timestamps = torch.arange(win_size, dtype=x.dtype, device=x.device)
+            local_timestamps = local_timestamps.view(1, 1, win_size).expand(B, C, -1)
+        else:
+            # An toàn cho mọi Batch Size: Đưa về chuẩn [B, C, win_size]
+            local_timestamps = local_timestamps.view(B, 1, win_size).expand(-1, C, -1)
+            
+        # 4. CHUẨN HÓA VẬT LÝ TÍN HIỆU
+        # Theta = 2 * pi * f * (t / win_size)
+        theta = 2 * math.pi * f * (local_timestamps / win_size) # [B, C, win_size]
+
+        # 5. Khôi phục
+        R = amplitude[:, :, :1] # [B, C, 1]
+        I = amplitude[:, :, 1:] # [B, C, 1]
+        
+        recon_x = R * torch.cos(theta) + I * torch.sin(theta)   # [B, C, win_size]
+
+        return recon_x
+
+class FreeExpert(nn.Module):
+    def __init__(self, win_size):
+        super(FreeExpert, self).__init__()
+        self.compressor = nn.Sequential(
+            nn.Linear(win_size, win_size//2),
+            nn.LeakyReLU(0.1),
+            nn.Linear(win_size//2, win_size//4)
+        )
+        self.reconstructor = nn.Sequential(
+            nn.Linear(win_size//4, win_size)
+        )
+    def forward(self, x):
+        # x: [B, C, win_size]
+        x = self.compressor(x)                # [B, C, win_size//4]
+        x = self.reconstructor(x)              # [B, C, win_size]
+        return x
         
 class Model(nn.Module):
     def __init__(self, win_size, d_model, top_k=2, channels = 1, num_experts = 4):
@@ -139,22 +207,12 @@ class Model(nn.Module):
         # Đảm bảo tổng dung lượng (bottleneck_dim * num_experts) chỉ bằng win_size // 2
         bottleneck_dim = win_size // (self.num_subsequences * 2) 
         bottleneck_dim = max(1, bottleneck_dim) # Đảm bảo ít nhất là 1 chiều
-        
-        self.compressor = nn.ModuleList(
-            [nn.Sequential(
-                # nn.Conv1d(in_channels=channels, out_channels = 2, kernel_size=4, stride=4, padding=0),
-                nn.Linear(win_size, d_model))\
-                # nn.GELU()) \
-                # nn.Conv1d(in_channels=2, out_channels=4, kernel_size=4, stride=4, padding=0),
-                # nn.GELU()) \
-             for _ in range(self.num_subsequences)])
-        
-        self.decompressor = nn.ModuleList(
-            [nn.Sequential( nn.Linear(d_model, win_size)) \
-                # nn.ConvTranspose1d(in_channels=4, out_channels=2, kernel_size=4, stride=4, padding=0),
-                # nn.GELU(),
-                # nn.ConvTranspose1d(in_channels=2, out_channels=channels, kernel_size=4, stride=4, padding=0, bias = False)) \
-                for _ in range(self.num_subsequences)])
+
+        num_free_expert = max(1, 0.4*num_experts)
+        num_wave_expert = num_experts - num_free_expert
+        experts = [WaveExpert(win_size) for _ in range(num_wave_expert)]
+        experts.extend([FreeExpert(win_size) for _ in range(num_free_expert)])
+        self.experts = nn.ModuleList(experts) 
         
     def forward(self, x): 
         epsi = 1e-5
@@ -172,9 +230,7 @@ class Model(nn.Module):
         # Ép qua bộ nén và bộ giải nén dung lượng thấp
         dec_x = []
         for i in range(self.num_subsequences):
-            enc_x = self.compressor[i](x_masked[:, i, : ,:])                # [B, d_model, win_size//4]     
-            # enc_x = self.compressor[i](x_masked)                            # [B, C, d_model]
-            dec_x.append(self.decompressor[i](enc_x))                       # [B, C, win_size]
+            dec_x.append(self.experts[i](x_masked[:, i, : ,:]))               # [B, C, win_size]
         dec_x = torch.stack(dec_x, dim=1)                                   # [B, num_subsequences, C, win_size]
         
         # Tổng hợp tuyến tính (Cộng đại số không học tham số)
