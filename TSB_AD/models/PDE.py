@@ -56,7 +56,8 @@ class MaskingNetwork(nn.Module):
         )
         
         self.project = nn.Conv1d(d_model * 4, num_experts*channels, kernel_size=1)
-        self.softmax = nn.Softmax(dim=1)
+        # self.softmax = nn.Softmax(dim=1)
+        self.sigmoid = nn.Sigmoid()
         
     def stft_multi_win(self, x):
         # Đầu vào: x [B, win_size, channels]
@@ -114,7 +115,8 @@ class MaskingNetwork(nn.Module):
         x = torch.cat([x1,x2,x3,x4], dim=1)             # [B, 4*d_model, win_size]
         x = self.project(x)                             # [B, num_experts*C, win_size]
         x = x.view(B,self.num_experts,C,win_size)       # [B, num_experts, C, win_size]
-        x = self.softmax(x)                             # [B, num_experts, C, win_size]
+        # x = self.softmax(x)                             # [B, num_experts, C, win_size]
+        x = self.sigmoid(x)
         
         return x
 
