@@ -159,6 +159,8 @@ class WaveExpert(nn.Module):
         amplitude = self.compress_amplitude(amplitude)   # [B*C, 2, 1]
         amplitude = amplitude.squeeze(-1)                # [B*C, 2]
         amplitude = amplitude.contiguous().view(B, C, 2) # [B, C, 2]
+
+        h = torch.cat([amplitude, f], dim=-1)            # [B, C, 3]
         # 3. Quản lý Timestamps (Bắt buộc dùng Local Time: 0 -> win_size - 1)
         if local_timestamps is None:
             # Tự động tạo nếu không truyền vào
@@ -177,7 +179,7 @@ class WaveExpert(nn.Module):
         I = amplitude[:, :, 1:] # [B, C, 1]
         
         recon_x = R * torch.cos(theta) + I * torch.sin(theta)   # [B, C, win_size]
-        return recon_x
+        return recon_x, h
 
 class GlobalExpert(nn.Module):
     def __init__(self, win_size):
@@ -192,19 +194,19 @@ class GlobalExpert(nn.Module):
         )
     def forward(self, x):
         # x: [B, C, win_size]
-        x = self.compressor(x)                # [B, C, win_size//4]
-        x = self.reconstructor(x)              # [B, C, win_size]
-        return x
+        h = self.compressor(x)                # [B, C, win_size//4]
+        x = self.reconstructor(h)              # [B, C, win_size]
+        return x, h
 
 class LocalExpert(nn.Module):
-    def __init__(self):
+    def __init__(self, d_model=32, channels=1):
         super(LocalExpert, self).__init__()
         kernel_size = 5
-        scale_factor= 16
+        scale_factor= 8
         # BỘ NÉN: Dùng Stride để ép giảm độ phân giải thời gian (Tạo Nút thắt)
         self.compressor = nn.Sequential(
             # Conv1d bắt đặc trưng cục bộ
-            nn.Conv1d(in_channels=1, out_channels=4, kernel_size=kernel_size, padding=kernel_size//2),
+            nn.Conv1d(in_channels=channels, out_channels=d_model, kernel_size=kernel_size, padding=kernel_size//2),
             # nn.GELU(), # Ở mảng cục bộ này có thể dùng phi tuyến để bắt noise tốt hơn
             # AvgPool với stride=scale_factor sẽ nén chiều dài chuỗi đi 4 lần (VD: 96 -> 24)
             # Nó pha loãng hoàn toàn các gai nhọn bất thường.
@@ -216,13 +218,13 @@ class LocalExpert(nn.Module):
             # Phóng to lại 4 lần bằng nội suy toán học mượt mà (24 -> 96)
             nn.Upsample(scale_factor=scale_factor, mode='linear', align_corners=False),
             # Conv1d làm mượt và đưa về 1 channel như ban đầu
-            nn.Conv1d(in_channels=4, out_channels=1, kernel_size=kernel_size, padding=kernel_size//2)
+            nn.Conv1d(in_channels=d_model, out_channels=channels, kernel_size=kernel_size, padding=kernel_size//2)
         )
         
     def forward(self, x):
-        x = self.compressor(x)
-        x = self.reconstructor(x)
-        return x
+        h = self.compressor(x)                        # [B, d_model, win_size//4]
+        x = self.reconstructor(h)
+        return x, h
 
 class Model(nn.Module):
     def __init__(self, win_size, d_model, top_k=2, channels = 1, num_experts = 4):
@@ -249,15 +251,18 @@ class Model(nn.Module):
         x = x.permute(0,2,1)                                                # [B, C, win_size]
         # Ép qua bộ nén và bộ giải nén dung lượng thấp
         dec_x = []
+        expert_h = []
         for expert in self.experts:
-            dec_x.append(expert(x))                                         # [B, C, win_size]
+            recon_x, h = expert(x)                                          # x: [B, C, win_size], h: [B, C, 3 or win_size//4]
+            expert_h.append(h)
+            dec_x.append(recon_x)                                         
         dec_x = torch.stack(dec_x, dim=1)                                   # [B, num_subsequences, C, win_size]
         
         # Tổng hợp tuyến tính (Cộng đại số không học tham số)
         x_out = dec_x.sum(dim=1)                                            # [B, C, win_size]
         x_out = x_out.permute(0,2,1)                                        # [B, win_size, C]
         
-        return x_norm, dec_x, x_out
+        return x_norm, dec_x, x_out, expert_h
     
 class PureLoss(nn.Module):
     def __init__(self, lambda_pure=0.1, lambda_var=0.005):
@@ -352,6 +357,8 @@ class PDE():
             batch_size=self.batch_size,
             shuffle=True
         )
+
+        self.train_loader = train_loader
         
         valid_loader = DataLoader(
             dataset=ReconstructDataset(tsValid, window_size=self.win_size),
@@ -374,7 +381,7 @@ class PDE():
                 
                 batch_x = batch_x.float().to(self.device)
                 out = self.model(batch_x)
-                x_norm, dec_x, x_recon = out
+                x_norm, dec_x, x_recon, expert_h = out
                 loss = self.criterion(x_norm, dec_x, x_recon)
                 loss.backward()
                 self.model_optim.step()
@@ -398,7 +405,7 @@ class PDE():
                 for i, (batch_x, _) in loop:
                     batch_x = batch_x.float().to(self.device)
 
-                    x_norm, dec_x, outputs = self.model(batch_x)
+                    x_norm, dec_x, outputs, expert_h = self.model(batch_x)
 
                     # if len(outputs.size()) == 2: outputs = outputs.unsqueeze(-1)
                     # outputs = outputs[:, :, f_dim:]
@@ -427,7 +434,37 @@ class PDE():
         
         self.model.eval()
         self.anomaly_criterion = nn.MSELoss(reduction='none')
+
+        self.expert_h = [[] for _ in range(self.num_experts)]
+        loop = tqdm.tqdm(enumerate(self.train_loader), total=len(self.train_loader), leave=True)
         
+        with torch.no_grad():
+            for i, (batch_x, _) in loop:
+                batch_x = batch_x.float().to(self.device)
+                if batch_x.dim() == 2:
+                    batch_x = batch_x.unsqueeze(-1)
+                
+                B = batch_x.size(0)
+                
+                # Reconstruction
+                _, _, _, expert_h = self.model(batch_x)                        # [B, C, hidden_size]
+
+                for i in range(self.num_experts):
+                    self.expert_h[i].append(expert_h[:,:,i])
+
+        self.mean_expert = []
+        self.inv_cor_matrix_expert = []
+        epsi=1e-5
+        for i in range(self.num_experts):
+            self.expert_h[i] = torch.cat(self.expert_h[i], dim=0)              # [B*num_batches, C, hidden_size]
+            N, C, h_size = self.expert_h[i].size()
+            self.expert_h[i] = self.expert_h[i].contiguous().view(N, C*h_size) # [B*num_batches, C*hidden_size]
+            self.mean_expert.append(self.expert_h[i].mean(dim=0))              # [1, C*hidden_size]
+            cor_matrix = torch.conv(A.T)                                       # [C*hidden_size, C*hidden_size]
+            noise = torch.eye(cor_matrix.size())*epsi                          # [C*hidden_size, C*hidden_size]
+            inv_cor = torch.linalg.inv(cor_matrix + noise)
+            self.inv_cor_matrix_expert.append(inv_cor)
+            
         # 1. Khởi tạo các mảng Global để chứa dữ liệu cộng dồn
         N = len(data)
         C = data.shape[-1] if data.ndim > 1 else 1 # Số kênh (channels)
@@ -445,19 +482,39 @@ class PDE():
         
         with torch.no_grad():
             for i, (batch_x, _) in loop:
-                batch_x = batch_x.float().to(self.device)
+                batch_x = batch_x.clone().float().detach().to(self.device)
+                batch_x.requires_grad_(True)
+                
                 if batch_x.dim() == 2:
                     batch_x = batch_x.unsqueeze(-1)
                 
                 B = batch_x.size(0)
                 
                 # Reconstruction
-                x_norm, dec_x, outputs = self.model(batch_x)
+                x_norm, dec_x, outputs, expert_h = self.model(batch_x)
                 
                 # Tính score theo từng điểm (Point-wise score)
                 # Kích thước: [B, win_size] (đã trung bình qua các kênh)
-                point_scores = torch.mean(self.anomaly_criterion(x_norm, outputs), dim=-1).cpu().numpy()
-                
+                mse_scores = torch.mean(self.anomaly_criterion(x_norm, outputs), dim=-1).cpu().numpy()
+
+                # Tính expert score theo từng điểm
+                expert_dist = []
+                for i in range(self.num_experts):
+                    B, C, hidden_size = expert_h[i].size()
+                    expert_h[i] = expert_h[i].contiguous().view(B, C*hidden_size)
+                    delta = expert_h[i] - self.mean_expert[i].unsqueeze(0)                                     # [B, hidden_size]
+                    dist = torch.einsum('bi,ij,bj->b', delta, self.inv_cor_matrix_expert[i], delta)            # [B]
+                    expert_dist.append(dist)
+                expert_dist = torch.stack(expert_dist, dim=0)                                                  # [num_experts, B]
+                latent_score_window = expert_dist.sum()                                                        # [B]
+                self.model.zero_grad()
+                latent_score_window.backward()       
+                gradient_map = batch_x.grad.abs()                                                              # [B, win_size, C]
+                expert_scores = self.lambda_expert*gradient_map*x_norm                                         # [B, win_size, C]
+                expert_scores = expert_score.mean(dim=-1)                                                      # [B, win_size]
+
+                point_scores = mse_scores + expert_scores
+                    
                 # Ép kiểu và đưa về CPU
                 x_norm_np = x_norm.cpu().numpy()                       # [B, win_size, C]
                 outputs_np = outputs.cpu().numpy()                     # [B, win_size, C]
