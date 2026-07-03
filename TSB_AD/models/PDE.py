@@ -227,12 +227,12 @@ class LocalExpert(nn.Module):
 class Model(nn.Module):
     def __init__(self, win_size, d_model, top_k=2, channels = 1, num_experts = 4):
         super(Model, self).__init__()
-        self.num_subsequences = max(num_experts,3)
+        num_experts = max(num_experts,3)
         self.win_size = win_size
 
         num_global_expert = max(1, int(0.2*num_experts))
         num_local_expert = max(1, int(0.2*num_experts))
-        num_wave_expert = num_experts - num_free_expert
+        num_wave_expert = num_experts - num_global_expert - num_local_expert
         experts = [WaveExpert(win_size) for _ in range(num_wave_expert)]
         experts.extend([GlobalExpert(win_size) for _ in range(num_global_expert)])
         experts.extend([LocalExperts() for _ in range(num_local_expert)])
