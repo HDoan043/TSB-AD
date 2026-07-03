@@ -230,8 +230,8 @@ class Model(nn.Module):
         num_experts = max(num_experts,3)
         self.win_size = win_size
 
-        num_global_expert = max(1, int(0.333*num_experts))
-        num_wave_expert = max(1, int(0.333*num_experts))
+        num_global_expert = max(1, int(0.25*num_experts))
+        num_wave_expert = max(1, int(0.5*num_experts))
         num_local_expert = num_experts - num_global_expert - num_wave_expert
         experts = [WaveExpert(win_size) for _ in range(num_wave_expert)]
         experts.extend([GlobalExpert(win_size) for _ in range(num_global_expert)])
