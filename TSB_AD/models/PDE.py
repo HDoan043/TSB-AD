@@ -200,12 +200,12 @@ class LocalExpert(nn.Module):
     def __init__(self):
         super(LocalExpert, self).__init__()
         kernel_size = 5
-        scale_factor= 4
+        scale_factor= 16
         # BỘ NÉN: Dùng Stride để ép giảm độ phân giải thời gian (Tạo Nút thắt)
         self.compressor = nn.Sequential(
             # Conv1d bắt đặc trưng cục bộ
             nn.Conv1d(in_channels=1, out_channels=4, kernel_size=kernel_size, padding=kernel_size//2),
-            nn.GELU(), # Ở mảng cục bộ này có thể dùng phi tuyến để bắt noise tốt hơn
+            # nn.GELU(), # Ở mảng cục bộ này có thể dùng phi tuyến để bắt noise tốt hơn
             # AvgPool với stride=scale_factor sẽ nén chiều dài chuỗi đi 4 lần (VD: 96 -> 24)
             # Nó pha loãng hoàn toàn các gai nhọn bất thường.
             nn.AvgPool1d(kernel_size=scale_factor, stride=scale_factor) 
