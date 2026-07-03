@@ -179,7 +179,7 @@ class WaveExpert(nn.Module):
         recon_x = R * torch.cos(theta) + I * torch.sin(theta)   # [B, C, win_size]
         return recon_x
 
-class FreeExpert(nn.Module):
+class GlobalExpert(nn.Module):
     def __init__(self, win_size):
         super(FreeExpert, self).__init__()
         self.compressor = nn.Sequential(
@@ -195,17 +195,47 @@ class FreeExpert(nn.Module):
         x = self.compressor(x)                # [B, C, win_size//4]
         x = self.reconstructor(x)              # [B, C, win_size]
         return x
+
+class LocalExpert(nn.Module):
+    def __init__(self):
+        super(LocalExpert, self).__init__()
+        kernel_size = 5
+        scale_factor= 4
+        # BỘ NÉN: Dùng Stride để ép giảm độ phân giải thời gian (Tạo Nút thắt)
+        self.compressor = nn.Sequential(
+            # Conv1d bắt đặc trưng cục bộ
+            nn.Conv1d(in_channels=1, out_channels=4, kernel_size=kernel_size, padding=kernel_size//2),
+            nn.GELU(), # Ở mảng cục bộ này có thể dùng phi tuyến để bắt noise tốt hơn
+            # AvgPool với stride=scale_factor sẽ nén chiều dài chuỗi đi 4 lần (VD: 96 -> 24)
+            # Nó pha loãng hoàn toàn các gai nhọn bất thường.
+            nn.AvgPool1d(kernel_size=scale_factor, stride=scale_factor) 
+        )
         
+        # BỘ KHÔI PHỤC: Dùng Upsample + Conv thay vì ConvTranspose để tránh gợn sóng răng cưa
+        self.reconstructor = nn.Sequential(
+            # Phóng to lại 4 lần bằng nội suy toán học mượt mà (24 -> 96)
+            nn.Upsample(scale_factor=scale_factor, mode='linear', align_corners=False),
+            # Conv1d làm mượt và đưa về 1 channel như ban đầu
+            nn.Conv1d(in_channels=4, out_channels=1, kernel_size=kernel_size, padding=kernel_size//2)
+        )
+        
+    def forward(self, x):
+        x = self.compressor(x)
+        x = self.reconstructor(x)
+        return x
+
 class Model(nn.Module):
     def __init__(self, win_size, d_model, top_k=2, channels = 1, num_experts = 4):
         super(Model, self).__init__()
-        self.num_subsequences = num_experts
+        self.num_subsequences = max(num_experts,3)
         self.win_size = win_size
 
-        num_free_expert = max(1, int(0.4*num_experts))
+        num_global_expert = max(1, int(0.2*num_experts))
+        num_local_expert = max(1, int(0.2*num_experts))
         num_wave_expert = num_experts - num_free_expert
         experts = [WaveExpert(win_size) for _ in range(num_wave_expert)]
-        experts.extend([FreeExpert(win_size) for _ in range(num_free_expert)])
+        experts.extend([GlobalExpert(win_size) for _ in range(num_global_expert)])
+        experts.extend([LocalExperts() for _ in range(num_local_expert)]
         self.experts = nn.ModuleList(experts) 
         
     def forward(self, x): 
