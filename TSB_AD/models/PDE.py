@@ -235,7 +235,7 @@ class Model(nn.Module):
         num_wave_expert = num_experts - num_global_expert - num_local_expert
         experts = [WaveExpert(win_size) for _ in range(num_wave_expert)]
         experts.extend([GlobalExpert(win_size) for _ in range(num_global_expert)])
-        experts.extend([LocalExperts() for _ in range(num_local_expert)])
+        experts.extend([LocalExpert() for _ in range(num_local_expert)])
         self.experts = nn.ModuleList(experts) 
         
     def forward(self, x): 
