@@ -181,7 +181,7 @@ class WaveExpert(nn.Module):
 
 class GlobalExpert(nn.Module):
     def __init__(self, win_size):
-        super(FreeExpert, self).__init__()
+        super(GlobalExpert, self).__init__()
         self.compressor = nn.Sequential(
             nn.Linear(win_size, win_size//2),
             nn.LeakyReLU(0.1),
