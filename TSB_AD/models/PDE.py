@@ -526,7 +526,7 @@ class PDE():
                 end = start + self.win_size
                 
                 full_mse_scores[start:end] += mse_scores[b]
-                full_experts_scores[start:end] += expert_scores[b]
+                full_expert_scores[start:end] += expert_scores[b]
                 full_true[start:end] += x_norm_np[b]
                 full_recon[start:end] += outputs_np[b]
                 full_experts[start:end] += dec_x_np[b]
