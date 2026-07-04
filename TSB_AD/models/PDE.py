@@ -129,12 +129,12 @@ class LocalExpert(nn.Module):
         x = x.contiguous().view(B, C, win_size)       # [B, C, win_size]
         return x
 
-class Model(nn.Module):
-    def __init__(self, win_size, d_model, top_k=2, channels = 1, num_experts = 4):
-        super(Model, self).__init__()
-        num_experts = max(num_experts,3)
+class Expert(nn.Module):
+    def __init__(self, win_size, d_model, top_k=2, channels = 1, num_experts = 5):
+        super(Expert, self).__init__()
+        self.num_experts = num_experts
         self.win_size = win_size
-
+        num_experts = max(num_experts,3)
         num_global_expert = max(1, int(0.2*num_experts))
         num_local_expert = max(1, int(0.2*num_experts))
         num_wave_expert = num_experts - num_global_expert - num_local_expert
@@ -143,7 +143,7 @@ class Model(nn.Module):
         experts.extend([LocalExpert(d_model = d_model) for _ in range(num_local_expert)])
         self.experts = nn.ModuleList(experts) 
         
-    def forward(self, x): 
+    def forward(self, x):
         epsi = 1e-5
         B, win_size, C = x.size()
         mean = x.mean(dim=1, keepdim=True)
@@ -164,6 +164,88 @@ class Model(nn.Module):
         x_out = x_out.permute(0,2,1)                                        # [B, win_size, C]
         
         return x_norm, dec_x, x_out
+        
+class Model(nn.Module):
+    def __init__(self, win_size, d_model, top_k=2, channels=1, num_experts=5, num_group_experts=3):
+        super(Model, self).__init__()
+        
+        # 1. Khởi tạo K nhóm chuyên gia
+        self.num_group_experts = num_group_experts if channels > 1 else 1
+        group_experts = [Expert(win_size, d_model, top_k=top_k, channels=1, num_experts=num_experts) for _ in range(num_group_experts)]
+        self.group_experts = nn.ModuleList(group_experts)
+        
+        # 2. Xây dựng Router Đủ Thông Minh (Không dùng Linear đơn thuần)
+        # Router dùng Conv1d để tóm gọn tính chất của chuỗi trước khi quyết định
+        self.router = nn.Sequential(
+            nn.Conv1d(in_channels=1, out_channels=4, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool1d(1), # Ép về 1 giá trị đại diện cho chuỗi
+            nn.Flatten(),
+            nn.Linear(4, num_group_experts),
+            nn.Softmax(dim=-1) # [B*C, num_group_experts]
+        )
+        self.channels = channels
+        self.win_size = win_size
+
+    def forward(self, x):                                            
+        # x: [B, win_size, C]
+        B, win_size, C = x.size()
+        
+        # Gập chiều B và C để xử lý độc lập nhưng siêu nhanh
+        # Chuẩn bị input cho các Experts: [B*C, win_size, 1]
+        x = x.permute(0,2,1)                                        # [B, C, win_size]
+        x_flat = x.contiguous().view(B * C, win_size, 1)            # [B*C, win_size, 1]
+        
+        # ==========================================
+        # BƯỚC 1: ROUTING (TÍNH TOÁN CỔNG GATING)
+        # ==========================================
+        # Router cần input dạng [B*C, 1, win_size] cho Conv1d
+        router_input = x_flat.permute(0, 2, 1) 
+        
+        # Tính xác suất phân bổ: [B*C, num_group_experts]
+        # Ví dụ: [0.8, 0.1, 0.1] nghĩa là 80% tin vào nhóm Expert 1
+        gate_weights = self.router(router_input) 
+        
+        # ==========================================
+        # BƯỚC 2: CHẠY TẤT CẢ CÁC NHÓM EXPERTS
+        # ==========================================
+        expert_outputs_norm = []
+        expert_outputs_dec = []
+        expert_outputs_out = []
+        
+        for i in range(self.num_group_experts):
+            # Chạy qua nhóm thứ i
+            x_norm, dec_x, x_out = self.group_experts[i](x_flat) 
+            
+            expert_outputs_norm.append(x_norm) # [B*C, win_size, 1]
+            expert_outputs_dec.append(dec_x)   # [B*C, num_sub, 1, win_size]
+            expert_outputs_out.append(x_out)   # [B*C, win_size, 1]
+            
+        # Stack lại theo chiều nhóm chuyên gia: [B*C, num_group_experts, win_size, 1]
+        all_x_out = torch.stack(expert_outputs_out, dim=1) 
+        all_x_norm = torch.stack(expert_outputs_norm, dim=1)
+        
+        # ==========================================
+        # BƯỚC 3: KẾT HỢP (WEIGHTED SUM) - KHÔNG DÙNG ARGMAX
+        # ==========================================
+        # Mở rộng gate_weights để nhân: [B*C, num_group_experts, 1, 1]
+        gate_weights = gate_weights.view(B * C, self.num_group_experts, 1, 1)
+        
+        # Nhân xác suất với output của từng nhóm chuyên gia và cộng lại
+        # Đây là bước quyết định giúp luồng đạo hàm không bị đứt
+        final_x_out = torch.sum(all_x_out * gate_weights, dim=1)   # [B*C, win_size, 1]
+        final_x_norm = torch.sum(all_x_norm * gate_weights, dim=1) # [B*C, win_size, 1]
+        
+        # (Để dec_x đơn giản, ta có thể chỉ lấy dec_x của nhóm có xác suất cao nhất 
+        # hoặc bỏ qua vì nó phục vụ visualize)
+        
+        # Mở lại chiều gốc: [B, win_size, C]
+        final_x_out = final_x_out.contiguous().view(B, win_size, C)
+        final_x_norm = final_x_norm.contiguous().view(B, win_size, C)
+        
+        # dec_x trả về None tạm thời để tiết kiệm RAM, 
+        # hoặc bạn có thể tự weight sum tương tự
+        return final_x_norm, None, final_x_out
     
 class PureLoss(nn.Module):
     def __init__(self):
@@ -178,23 +260,23 @@ class PureLoss(nn.Module):
         recon_loss = self.mse(batch_x_norm, batch_x_out)
         
         # 2. Tính ma trận Cosine tương quan bình phương
-        batch_dec_x_norm = batch_dec_x / torch.sqrt((batch_dec_x ** 2).sum(dim=-1, keepdim=True) + eps)     # [B, num_experts, C, win_size]
-        batch_dec_x_norm = batch_dec_x_norm.permute(0,2,1,3)                                                # [B, C, num_experts, win_size]
-        cos_sim_matrix = batch_dec_x_norm @ batch_dec_x_norm.permute(0, 1, 3, 2)                            # [B, C, num_experts, num_experts]
-        cos_sim_matrix_sq = cos_sim_matrix ** 2
+        # batch_dec_x_norm = batch_dec_x / torch.sqrt((batch_dec_x ** 2).sum(dim=-1, keepdim=True) + eps)     # [B, num_experts, C, win_size]
+        # batch_dec_x_norm = batch_dec_x_norm.permute(0,2,1,3)                                                # [B, C, num_experts, win_size]
+        # cos_sim_matrix = batch_dec_x_norm @ batch_dec_x_norm.permute(0, 1, 3, 2)                            # [B, C, num_experts, num_experts]
+        # cos_sim_matrix_sq = cos_sim_matrix ** 2
         
-        # 3. Xóa đường chéo chính
-        num_sub = batch_dec_x.size(1)
-        diagonal_mask = torch.eye(num_sub, device=batch_dec_x.device).unsqueeze(0)
-        cos_sim_matrix_sq = cos_sim_matrix_sq * (1 - diagonal_mask)
+        # # 3. Xóa đường chéo chính
+        # num_sub = batch_dec_x.size(1)
+        # diagonal_mask = torch.eye(num_sub, device=batch_dec_x.device).unsqueeze(0)
+        # cos_sim_matrix_sq = cos_sim_matrix_sq * (1 - diagonal_mask)
 
-        # pure loss trung bình trên các kênh của các mẫu trong 1 batch
-        num_pairs = num_sub * (num_sub - 1)
-        pure_loss = cos_sim_matrix_sq.sum() / (batch_x_norm.size(0) * batch_x_norm.size(-1) * num_pairs)
+        # # pure loss trung bình trên các kênh của các mẫu trong 1 batch
+        # num_pairs = num_sub * (num_sub - 1)
+        # pure_loss = cos_sim_matrix_sq.sum() / (batch_x_norm.size(0) * batch_x_norm.size(-1) * num_pairs)
 
-        # phạt nghiệm tầm thường
-        expert_std = batch_dec_x.std(dim=-1) # [B, num_experts, C]
-        var_penalty = torch.mean(1.0 / (expert_std + eps))
+        # # phạt nghiệm tầm thường
+        # expert_std = batch_dec_x.std(dim=-1) # [B, num_experts, C]
+        # var_penalty = torch.mean(1.0 / (expert_std + eps))
         
         # 4. Cộng tổng hợp có trọng số
         # total_loss = recon_loss + self.lambda_pure*pure_loss + self.lambda_var*var_penalty
