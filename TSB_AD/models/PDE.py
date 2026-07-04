@@ -168,84 +168,11 @@ class Expert(nn.Module):
 class Model(nn.Module):
     def __init__(self, win_size, d_model, top_k=2, channels=1, num_experts=5, num_group_experts=3):
         super(Model, self).__init__()
-        
-        # 1. Khởi tạo K nhóm chuyên gia
-        self.num_group_experts = num_group_experts if channels > 1 else 1
-        group_experts = [Expert(win_size, d_model, top_k=top_k, channels=1, num_experts=num_experts) for _ in range(num_group_experts)]
-        self.group_experts = nn.ModuleList(group_experts)
-        
-        # 2. Xây dựng Router Đủ Thông Minh (Không dùng Linear đơn thuần)
-        # Router dùng Conv1d để tóm gọn tính chất của chuỗi trước khi quyết định
-        self.router = nn.Sequential(
-            nn.Conv1d(in_channels=1, out_channels=4, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool1d(1), # Ép về 1 giá trị đại diện cho chuỗi
-            nn.Flatten(),
-            nn.Linear(4, num_group_experts),
-            nn.Softmax(dim=-1) # [B*C, num_group_experts]
-        )
-        self.channels = channels
-        self.win_size = win_size
+        self.experts = Expert(win_size, d_model, top_k=2, channels=1, num_experts=5)
 
     def forward(self, x):                                            
-        # x: [B, win_size, C]
-        B, win_size, C = x.size()
-        
-        # Gập chiều B và C để xử lý độc lập nhưng siêu nhanh
-        # Chuẩn bị input cho các Experts: [B*C, win_size, 1]
-        x = x.permute(0,2,1)                                        # [B, C, win_size]
-        x_flat = x.contiguous().view(B * C, win_size, 1)            # [B*C, win_size, 1]
-        
-        # ==========================================
-        # BƯỚC 1: ROUTING (TÍNH TOÁN CỔNG GATING)
-        # ==========================================
-        # Router cần input dạng [B*C, 1, win_size] cho Conv1d
-        router_input = x_flat.permute(0, 2, 1) 
-        
-        # Tính xác suất phân bổ: [B*C, num_group_experts]
-        # Ví dụ: [0.8, 0.1, 0.1] nghĩa là 80% tin vào nhóm Expert 1
-        gate_weights = self.router(router_input) 
-        
-        # ==========================================
-        # BƯỚC 2: CHẠY TẤT CẢ CÁC NHÓM EXPERTS
-        # ==========================================
-        expert_outputs_norm = []
-        expert_outputs_dec = []
-        expert_outputs_out = []
-        
-        for i in range(self.num_group_experts):
-            # Chạy qua nhóm thứ i
-            x_norm, dec_x, x_out = self.group_experts[i](x_flat) 
-            
-            expert_outputs_norm.append(x_norm) # [B*C, win_size, 1]
-            expert_outputs_dec.append(dec_x)   # [B*C, num_sub, 1, win_size]
-            expert_outputs_out.append(x_out)   # [B*C, win_size, 1]
-            
-        # Stack lại theo chiều nhóm chuyên gia: [B*C, num_group_experts, win_size, 1]
-        all_x_out = torch.stack(expert_outputs_out, dim=1) 
-        all_x_norm = torch.stack(expert_outputs_norm, dim=1)
-        
-        # ==========================================
-        # BƯỚC 3: KẾT HỢP (WEIGHTED SUM) - KHÔNG DÙNG ARGMAX
-        # ==========================================
-        # Mở rộng gate_weights để nhân: [B*C, num_group_experts, 1, 1]
-        gate_weights = gate_weights.view(B * C, self.num_group_experts, 1, 1)
-        
-        # Nhân xác suất với output của từng nhóm chuyên gia và cộng lại
-        # Đây là bước quyết định giúp luồng đạo hàm không bị đứt
-        final_x_out = torch.sum(all_x_out * gate_weights, dim=1)   # [B*C, win_size, 1]
-        final_x_norm = torch.sum(all_x_norm * gate_weights, dim=1) # [B*C, win_size, 1]
-        
-        # (Để dec_x đơn giản, ta có thể chỉ lấy dec_x của nhóm có xác suất cao nhất 
-        # hoặc bỏ qua vì nó phục vụ visualize)
-        
-        # Mở lại chiều gốc: [B, win_size, C]
-        final_x_out = final_x_out.contiguous().view(B, win_size, C)
-        final_x_norm = final_x_norm.contiguous().view(B, win_size, C)
-        
-        # dec_x trả về None tạm thời để tiết kiệm RAM, 
-        # hoặc bạn có thể tự weight sum tương tự
-        return final_x_norm, None, final_x_out
+        x_norm, dec_x, x_out = self.experts(x)
+        return x_norm, dec_x, x_out
     
 class PureLoss(nn.Module):
     def __init__(self):
@@ -408,7 +335,8 @@ class PDE():
                 break
             
             adjust_learning_rate(self.model_optim, epoch + 1, self.lradj, self.lr)
-    def decision_function(self, data):
+            
+    def decision_function(self, data, k_ratio=0.1): # Truyền thêm tham số k_ratio
         test_loader = DataLoader(
             dataset=ReconstructDataset(data, window_size=self.win_size),
             batch_size=self.batch_size,
@@ -417,126 +345,86 @@ class PDE():
         
         self.model.eval()
         self.anomaly_criterion = nn.MSELoss(reduction='none')
-
-        # self.expert_h = [[] for _ in range(self.num_experts)]
-        # loop = tqdm.tqdm(enumerate(self.train_loader), total=len(self.train_loader), leave=True)
-        
-        # with torch.no_grad():
-        #     for i, (batch_x, _) in loop:
-        #         batch_x = batch_x.float().to(self.device)
-        #         if batch_x.dim() == 2:
-        #             batch_x = batch_x.unsqueeze(-1)
-                
-        #         B = batch_x.size(0)
-                
-        #         # Reconstruction
-        #         _, _, _, expert_h = self.model(batch_x)                        # [B, C, hidden_size]*num_expert
-
-        #         for j in range(self.num_experts):
-        #             self.expert_h[j].append(expert_h[j])
-
-        # self.mean_expert = []
-        # self.inv_cor_matrix_expert = []
-        # epsi=1e-5
-        # for i in range(self.num_experts):
-        #     self.expert_h[i] = torch.cat(self.expert_h[i], dim=0)              # [B*num_batches, C, hidden_size]
-        #     N, C, h_size = self.expert_h[i].size()
-        #     self.expert_h[i] = self.expert_h[i].contiguous().view(N, C*h_size) # [B*num_batches, C*hidden_size]
-        #     self.mean_expert.append(self.expert_h[i].mean(dim=0))              # [1, C*hidden_size]
-        #     cor_matrix = torch.cov(self.expert_h[i].T)                         # [C*hidden_size, C*hidden_size]
-        #     noise = torch.eye(cor_matrix.size(0), device=self.device)*epsi     # [C*hidden_size, C*hidden_size]
-        #     inv_cor = torch.linalg.inv(cor_matrix + noise)
-        #     self.inv_cor_matrix_expert.append(inv_cor)
             
         # 1. Khởi tạo các mảng Global để chứa dữ liệu cộng dồn
         N = len(data)
         C = data.shape[-1] if data.ndim > 1 else 1 # Số kênh (channels)
-        
-        # full_mse_scores = np.zeros(N)
-        # full_expert_scores = np.zeros(N)
+
+        top_k_channels = max(1, int(C * k_ratio)) # FIX 1: Dùng biến C
         full_counts = np.zeros(N)
-        full_score = np.zeros(N)
+        full_scores = np.zeros(N) # FIX 2: Đồng nhất tên full_scores
         
         # Lưu lại để debug
         full_recon = np.zeros((N, C))
         full_true = np.zeros((N, C))
         full_experts = np.zeros((N, self.num_experts, C))
         
-        
         global_idx = 0
         loop = tqdm.tqdm(enumerate(test_loader), total=len(test_loader), leave=True)
         
-        for param in self.model.parameters():
-            param.requires_grad = False
-        for i, (batch_x, _) in loop:
-            batch_x = batch_x.clone().float().detach().to(self.device)
-            batch_x.requires_grad_(True)
-            
-            if batch_x.dim() == 2:
-                batch_x = batch_x.unsqueeze(-1)
-            
-            B = batch_x.size(0)
-            
-            # Reconstruction
-            x_norm, dec_x, outputs = self.model(batch_x)
-            
-            # Tính score theo từng điểm (Point-wise score)
-            # Kích thước: [B, win_size] (đã trung bình qua các kênh)
-            mse_scores = torch.mean(self.anomaly_criterion(x_norm, outputs), dim=-1).detach().cpu().numpy()
-
-            # Tính expert score theo từng điểm
-            # expert_dist = []
-            # for i in range(self.num_experts):
-            #     B, C, hidden_size = expert_h[i].size()
-            #     expert_h[i] = expert_h[i].contiguous().view(B, C*hidden_size)
-            #     delta = expert_h[i] - self.mean_expert[i].unsqueeze(0)                                     # [B, hidden_size]
-            #     dist = torch.einsum('bi,ij,bj->b', delta, self.inv_cor_matrix_expert[i], delta)            # [B]
-            #     expert_dist.append(dist)
-            # expert_dist = torch.stack(expert_dist, dim=0)                                                  # [num_experts, B]
-            # latent_score_window = expert_dist.sum()                                                        # [B]
-            # self.model.zero_grad()
-            # latent_score_window.backward()       
-            # expert_scores = batch_x.grad.abs()                                                              # [B, win_size, C]
-            # expert_scores = expert_scores.mean(dim=-1).detach().cpu().numpy()                              # [B, win_size]
-
-            # Ép kiểu và đưa về CPU
-            x_norm_np = x_norm.detach().cpu().numpy()                       # [B, win_size, C]
-            outputs_np = outputs.detach().cpu().numpy()                     # [B, win_size, C]
-            dec_x_np = dec_x.permute(0, 3, 1, 2).detach().cpu().numpy()     # ĐÚNG shape [B, win_size, num_experts, C]     
-            
-            # 2. Xử lý Overlap: Cộng dồn vào mảng Global
-            for b in range(B):
-                start = global_idx + b
-                end = start + self.win_size
-
-                full_scores[start:end] += mse_score[b]
-                # full_mse_scores[start:end] += mse_scores[b]
-                # full_expert_scores[start:end] += expert_scores[b]
-                full_true[start:end] += x_norm_np[b]
-                full_recon[start:end] += outputs_np[b]
-                full_experts[start:end] += dec_x_np[b]
-                full_counts[start:end] += 1
+        with torch.no_grad(): # Đã bỏ luồng đạo hàm, thuật toán sẽ chạy cực mượt
+            for i, (batch_x, _) in loop:
+                batch_x = batch_x.float().to(self.device)
                 
-            global_idx += B
-            loop.set_description(f'Testing Phase: ')
+                if batch_x.dim() == 2:
+                    batch_x = batch_x.unsqueeze(-1)
+                
+                B = batch_x.size(0)
+                
+                # Reconstruction
+                x_norm, dec_x, outputs = self.model(batch_x)
+                
+                # Kích thước: [B, win_size, C]
+                loss_matrix = self.anomaly_criterion(x_norm, outputs) 
+                
+                # ==========================================
+                # LATE FUSION: KẾT HỢP ĐIỂM SỐ ĐA BIẾN
+                # ==========================================
+                if C > 1:
+                    # Sort lỗi theo chiều Kênh (dim=-1), giảm dần
+                    sorted_loss, _ = torch.sort(loss_matrix, dim=-1, descending=True)
+                    
+                    # Lấy Top K kênh tệ nhất: [B, win_size, top_k_channels]
+                    top_k_loss = sorted_loss[:, :, :top_k_channels]
+                    
+                    # Tính trung bình của Top K kênh này: [B, win_size]
+                    mse_scores = torch.mean(top_k_loss, dim=-1)
+                else:
+                    # Nếu đơn biến, lấy lỗi nguyên bản: [B, win_size]
+                    mse_scores = loss_matrix.squeeze(-1)
+                
+                # Ép về NumPy
+                mse_scores_np = mse_scores.cpu().numpy()
 
-        # Tránh chia cho 0 ở những điểm không được cover (nếu có)
+                # Ép kiểu và đưa về CPU (không cần .detach() vì đã dùng torch.no_grad())
+                x_norm_np = x_norm.cpu().numpy()                        
+                outputs_np = outputs.cpu().numpy()                      
+                dec_x_np = dec_x.permute(0, 3, 1, 2).cpu().numpy()           
+                
+                # 2. Xử lý Overlap: Cộng dồn vào mảng Global
+                for b in range(B):
+                    start = global_idx + b
+                    end = start + self.win_size
+    
+                    full_scores[start:end] += mse_scores_np[b] # FIX 3: Gọi đúng tên biến
+                    full_true[start:end] += x_norm_np[b]
+                    full_recon[start:end] += outputs_np[b]
+                    full_experts[start:end] += dec_x_np[b]
+                    full_counts[start:end] += 1
+                    
+                global_idx += B
+                loop.set_description(f'Testing Phase: ')
+
+        # Tránh chia cho 0 ở những điểm không được cover
         full_counts[full_counts == 0] = 1
         
         # 3. Tính trung bình (Averaging) để khử nhiễu và làm mượt
-        # full_mse_scores = full_mse_scores / full_counts
-        # full_expert_scores = full_expert_scores / full_counts
-        full_scores = full_scores / full_counts[:, None]
+        full_scores = full_scores / full_counts # FIX 4: Bỏ [:, None] để tránh tràn RAM
         full_true = full_true / full_counts[:, None]
         full_recon = full_recon / full_counts[:, None]
         full_experts = full_experts / full_counts[:, None, None]
 
-        # eps = 1e-8
-        # # min-max normalization
-        # norm_mse = (full_mse_scores - full_mse_scores.min())/(full_mse_scores.max() - full_mse_scores.min() + eps)
-        # norm_expert = (full_expert_scores - full_expert_scores.min())/(full_expert_scores.max() - full_expert_scores.min() + eps)
-        
-        self.__anomaly_score = (1-self.lambda_expert)*norm_mse + self.lambda_expert*norm_expert
+        self.__anomaly_score = full_scores # FIX 5: Bỏ lambda cũ
         
         # Đóng gói dữ liệu debug
         self.debug_data = {
@@ -545,8 +433,10 @@ class PDE():
             "recon_seq": full_recon,
             "expert_seqs": full_experts
         }
-        for key, value in self.debug_data.items():
-            np.save(os.path.join(self.save_path, f"{key}.npy"), value)
+        
+        if hasattr(self, 'save_path') and self.save_path:
+            for key, value in self.debug_data.items():
+                np.save(os.path.join(self.save_path, f"{key}.npy"), value)
         
         return self.__anomaly_score
     # def decision_function(self, data):
