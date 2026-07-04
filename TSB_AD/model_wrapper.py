@@ -45,6 +45,8 @@ def run_PDE(data_train, data_test, win_size=96, d_model =32, top_k=3, num_expert
     from .models.PDE import PDE
     clf = PDE(win_size = win_size, d_model=d_model, channels=data_test.shape[1], top_k=top_k, 
               num_experts=num_experts, lambda_expert=lambda_expert, lr = lr, epochs = epochs)
+    trainable_params = sum(p.numel() for p in clf.parameters() if p.requires_grad)
+    print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
@@ -289,6 +291,8 @@ def run_AutoEncoder(data_train, data_test, window_size=100, hidden_neurons=[64, 
 def run_CNN(data_train, data_test, window_size=100, num_channel=[32, 32, 40], lr=0.0008, n_jobs=1):
     from .models.CNN import CNN
     clf = CNN(window_size=window_size, num_channel=num_channel, feats=data_test.shape[1], lr=lr, batch_size=128)
+    trainable_params = sum(p.numel() for p in clf.parameters() if p.requires_grad)
+    print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
@@ -310,6 +314,8 @@ def run_TranAD(data_train, data_test, win_size=10, lr=1e-3):
 def run_AnomalyTransformer(data_train, data_test, win_size=100, lr=1e-4, batch_size=128):
     from .models.AnomalyTransformer import AnomalyTransformer
     clf = AnomalyTransformer(win_size=win_size, input_c=data_test.shape[1], lr=lr, batch_size=batch_size)
+    trainable_params = sum(p.numel() for p in clf.parameters() if p.requires_grad)
+    print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
@@ -317,6 +323,8 @@ def run_AnomalyTransformer(data_train, data_test, win_size=100, lr=1e-4, batch_s
 def run_PatchTST(data_train, data_test, win_size=100, lr=1e-4, batch_size=128):
     from .models.PatchTST import PatchTST
     clf = PatchTST(win_size=win_size, input_c=data_test.shape[1], lr=lr, batch_size=batch_size)
+    trainable_params = sum(p.numel() for p in clf.parameters() if p.requires_grad)
+    print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
@@ -345,6 +353,8 @@ def run_Donut(data_train, data_test, win_size=120, lr=1e-4, batch_size=128):
 def run_TimesNet(data_train, data_test, win_size=96, lr=1e-4):
     from .models.TimesNet import TimesNet
     clf = TimesNet(win_size=win_size, enc_in=data_test.shape[1], lr=lr, epochs=50)
+    trainable_params = sum(p.numel() for p in clf.parameters() if p.requires_grad)
+    print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
