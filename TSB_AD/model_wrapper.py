@@ -306,6 +306,9 @@ def run_CNN(data_train, data_test, window_size=100, num_channel=[32, 32, 40], lr
 def run_LSTMAD(data_train, data_test, window_size=100, lr=0.0008):
     from .models.LSTMAD import LSTMAD
     clf = LSTMAD(window_size=window_size, pred_len=1, lr=lr, feats=data_test.shape[1], batch_size=128)
+    global trainable_params 
+    trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
+    print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
