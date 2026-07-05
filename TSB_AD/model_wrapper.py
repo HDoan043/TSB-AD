@@ -641,6 +641,9 @@ def run_DualStreamAD(data_train, data_test, window_size=100, pred_len=1,
                        flow_weight=flow_weight, flow_epochs=flow_epochs,
                        batch_size=batch_size, epochs=epochs,
                        max_train_windows=max_train_windows)
+    global trainable_params 
+    trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
+    print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
