@@ -16,7 +16,8 @@ def run_Unsupervise_AD(model_name, data, **kwargs):
         function_name = f'run_{model_name}'
         function_to_call = globals()[function_name]
         results = function_to_call(data, **kwargs)
-        return results, global trainable_params
+        trainable_params = global trainable_params
+        return results, trainable_params
     except KeyError:
         error_message = f"Model function '{function_name}' is not defined."
         print(error_message)
@@ -32,7 +33,8 @@ def run_Semisupervise_AD(model_name, data_train, data_test, **kwargs):
         function_name = f'run_{model_name}'
         function_to_call = globals()[function_name]
         results = function_to_call(data_train, data_test, **kwargs)
-        return results, global trainable_params
+        trainable_params = global trainable_params
+        return results, trainable_params
     except KeyError:
         error_message = f"Model function '{function_name}' is not defined."
         print(error_message)
