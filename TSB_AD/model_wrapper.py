@@ -10,12 +10,13 @@ Unsupervise_AD_Pool = ['FFT', 'SR', 'NORMA', 'Series2Graph', 'Sub_IForest', 'IFo
 Semisupervise_AD_Pool = ['Left_STAMPi', 'SAND', 'MCD', 'Sub_MCD', 'OCSVM', 'Sub_OCSVM', 'AutoEncoder', 'CNN', 'LSTMAD', 'TranAD', 'USAD', 'OmniAnomaly', 'PatchTST',
                         'AnomalyTransformer', 'TimesNet', 'FITS', 'Donut', 'OFA', 'MOMENT_FT', 'M2N2', 'TSPulse_FT', 'xLSTMAD', 'CHARM', 'StreamVAE', 'MTSC', "PDE", 'DualStreamAD']
 
+trainable_params = 0
 def run_Unsupervise_AD(model_name, data, **kwargs):
     try:
         function_name = f'run_{model_name}'
         function_to_call = globals()[function_name]
         results = function_to_call(data, **kwargs)
-        return results
+        return results, global trainable_params
     except KeyError:
         error_message = f"Model function '{function_name}' is not defined."
         print(error_message)
@@ -31,7 +32,7 @@ def run_Semisupervise_AD(model_name, data_train, data_test, **kwargs):
         function_name = f'run_{model_name}'
         function_to_call = globals()[function_name]
         results = function_to_call(data_train, data_test, **kwargs)
-        return results
+        return results, global trainable_params
     except KeyError:
         error_message = f"Model function '{function_name}' is not defined."
         print(error_message)
@@ -41,11 +42,11 @@ def run_Semisupervise_AD(model_name, data_train, data_test, **kwargs):
         print(error_message)
         return error_message
 
-def run_PDE(data_train, data_test, win_size=96, d_model =32, top_k=3, num_experts=4, lambda_expert=0.5, lr=1e-4, epochs=50):
+def run_PDE(data_train, data_test, win_size=96, d_model =32, top_k=3, num_experts=5, lr=1e-4, epochs=50):
     from .models.PDE import PDE
     clf = PDE(win_size = win_size, d_model=d_model, channels=data_test.shape[1], top_k=top_k, 
-              num_experts=num_experts, lambda_expert=lambda_expert, lr = lr, epochs = epochs)
-    trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
+              num_experts=num_experts, lr = lr, epochs = epochs)
+    global trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
     print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
@@ -284,7 +285,7 @@ def run_SR(data, periodicity=1):
 def run_AutoEncoder(data_train, data_test, window_size=100, hidden_neurons=[64, 32], n_jobs=1):
     from .models.AE import AutoEncoder
     clf = AutoEncoder(slidingWindow=window_size, hidden_neurons=hidden_neurons, batch_size=128, epochs=50)
-    trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
+    global trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
     print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
@@ -293,7 +294,7 @@ def run_AutoEncoder(data_train, data_test, window_size=100, hidden_neurons=[64, 
 def run_CNN(data_train, data_test, window_size=100, num_channel=[32, 32, 40], lr=0.0008, n_jobs=1):
     from .models.CNN import CNN
     clf = CNN(window_size=window_size, num_channel=num_channel, feats=data_test.shape[1], lr=lr, batch_size=128)
-    trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
+    global trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
     print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
@@ -316,7 +317,7 @@ def run_TranAD(data_train, data_test, win_size=10, lr=1e-3):
 def run_AnomalyTransformer(data_train, data_test, win_size=100, lr=1e-4, batch_size=128):
     from .models.AnomalyTransformer import AnomalyTransformer
     clf = AnomalyTransformer(win_size=win_size, input_c=data_test.shape[1], lr=lr, batch_size=batch_size)
-    trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
+    global trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
     print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
@@ -325,7 +326,7 @@ def run_AnomalyTransformer(data_train, data_test, win_size=100, lr=1e-4, batch_s
 def run_PatchTST(data_train, data_test, win_size=100, lr=1e-4, batch_size=128):
     from .models.PatchTST import PatchTST
     clf = PatchTST(win_size=win_size, input_c=data_test.shape[1], lr=lr, batch_size=batch_size)
-    trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
+    global trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
     print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
@@ -355,7 +356,7 @@ def run_Donut(data_train, data_test, win_size=120, lr=1e-4, batch_size=128):
 def run_TimesNet(data_train, data_test, win_size=96, lr=1e-4):
     from .models.TimesNet import TimesNet
     clf = TimesNet(win_size=win_size, enc_in=data_test.shape[1], lr=lr, epochs=50)
-    trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
+    global trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
     print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
