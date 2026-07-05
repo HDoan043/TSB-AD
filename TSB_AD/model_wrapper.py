@@ -343,6 +343,9 @@ def run_PatchTST(data_train, data_test, win_size=100, lr=1e-4, batch_size=128):
 def run_OmniAnomaly(data_train, data_test, win_size=100, lr=0.002):
     from .models.OmniAnomaly import OmniAnomaly
     clf = OmniAnomaly(win_size=win_size, feats=data_test.shape[1], lr=lr)
+    global trainable_params 
+    trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
+    print(f"Total parameters: {trainable_params}")
     clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
