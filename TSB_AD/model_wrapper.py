@@ -286,10 +286,10 @@ def run_SR(data, periodicity=1):
 def run_AutoEncoder(data_train, data_test, window_size=100, hidden_neurons=[64, 32], n_jobs=1):
     from .models.AE import AutoEncoder
     clf = AutoEncoder(slidingWindow=window_size, hidden_neurons=hidden_neurons, batch_size=128, epochs=50)
+    clf.fit(data_train)
     global trainable_params 
     trainable_params = sum(p.numel() for p in clf.model.parameters() if p.requires_grad)
     print(f"Total parameters: {trainable_params}")
-    clf.fit(data_train)
     score = clf.decision_function(data_test)
     return score.ravel()
 
